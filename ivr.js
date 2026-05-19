@@ -10,7 +10,6 @@ const router = YemotRouter({ printLog: true });
 router.get('/', async (call) => {
     const phone = call.ApiPhone;
 
-    // קבלת פרטי לקוח
     let customer = null;
     let welcomeMsg = 'שלום וברוכים הבאים למערכת התמלול';
     try {
@@ -43,7 +42,6 @@ router.get('/', async (call) => {
 });
 
 async function handleRecording(call, phone, customer) {
-    // בדיקת יתרה
     const minBalance = 0;
     if (customer && customer.balance <= minBalance) {
         const choice = await call.read([{
@@ -60,13 +58,23 @@ async function handleRecording(call, phone, customer) {
         }
     }
 
-    // הקלטה
     const recPath = await call.read([{
         type: 'text',
         data: 'השאר את הודעתך לאחר הצליל לסיום הקש סולמית או נתק'
-    }], 'record', { no_confirm_menu: true, save_on_hangup: true });
+    }], 'record', {
+        no_confirm_menu: true,
+        save_on_hangup: true,
+        path: '/recordings'
+    });
 
-    // בחירת אמצעי שליחה אם אין מייל/פקס שמור
+    console.log('recPath received:', recPath);
+
+    let fullRecUrl = recPath;
+    if (recPath && !recPath.startsWith('http')) {
+        fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${recPath}`;
+    }
+    console.log('fullRecUrl:', fullRecUrl);
+
     let deliveryMethod = customer ? customer.delivery_method : 'email';
     let deliveredTo = customer ? (customer.email || customer.fax || '') : '';
 
@@ -103,17 +111,10 @@ async function handleRecording(call, phone, customer) {
         }
     }
 
-    // שליחה לתמלול
-    // תיקון כתובת הקלטה
-let fullRecUrl = recPath;
-if (recPath && !recPath.startsWith('http')) {
-    fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${recPath}`;
-}
-
-try {
-    await axios.post(`${PYTHON_URL}/api/transcribe`, {
-        phone,
-        rec_url: fullRecUrl,
+    try {
+        await axios.post(`${PYTHON_URL}/api/transcribe`, {
+            phone,
+            rec_url: fullRecUrl,
             call_id: call.ApiCallId,
             delivery_method: deliveryMethod,
             delivered_to: deliveredTo
