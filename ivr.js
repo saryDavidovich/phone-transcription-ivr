@@ -104,10 +104,16 @@ async function handleRecording(call, phone, customer) {
     }
 
     // שליחה לתמלול
-    try {
-        await axios.post(`${PYTHON_URL}/api/transcribe`, {
-            phone,
-            rec_url: recPath,
+    // תיקון כתובת הקלטה
+let fullRecUrl = recPath;
+if (recPath && !recPath.startsWith('http')) {
+    fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${recPath}`;
+}
+
+try {
+    await axios.post(`${PYTHON_URL}/api/transcribe`, {
+        phone,
+        rec_url: fullRecUrl,
             call_id: call.ApiCallId,
             delivery_method: deliveryMethod,
             delivered_to: deliveredTo
