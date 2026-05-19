@@ -1,0 +1,13 @@
+{
+  "name": "phone-transcription-ivr",
+  "version": "1.0.0",
+  "main": "ivr.js",
+  "dependencies": {
+    "express": "^4.18.2",
+    "yemot-router2": "^6.2.0",
+    "axios": "^1.6.0"
+  },
+  "scripts": {
+    "start": "node ivr.js"
+  }
+}
