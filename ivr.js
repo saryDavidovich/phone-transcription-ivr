@@ -75,28 +75,17 @@ router.get('/', async (call) => {
 });
 
 async function getEmailByKeypad(call) {
-    await call.id_list_message([{
-        type: 'text',
-        data: 'הקלד את כתובת המייל שלך לפי מקשי הטלפון להפרדה בין מקשים עוקבים הקש כוכבית לסיום הקש סולמית'
-    }]);
-
     const input = await call.read([{
         type: 'text',
-        data: 'מתחיל הקלדה'
-    }], 'tap', { max_digits: 50, terminate_keys: ['#'] });
+        data: 'הקלד את כתובת המייל שלך לפי מקשי הטלפון לנקודה הקש 1 לאט אם שתי פעמים הקש כוכבית ביניהם לסיום הקש סולמית'
+    }], 'tap', { max_digits: 100, terminate_keys: ['#'] });
 
     const email = decodeEmail(input);
     console.log('email input:', input, '-> decoded:', email);
 
-    // קריאה לאישור
-    await call.id_list_message([{
-        type: 'text',
-        data: `המייל שהוקלד הוא ${email} לאישור הקש 1 להקלדה מחדש הקש 2`
-    }]);
-
     const confirm = await call.read([{
         type: 'text',
-        data: ''
+        data: `המייל שהוקלד הוא ${email} לאישור הקש 1 להקלדה מחדש הקש 2`
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (confirm === '1') {
@@ -105,7 +94,6 @@ async function getEmailByKeypad(call) {
         return await getEmailByKeypad(call);
     }
 }
-
 async function handleRecording(call, phone, customer) {
     const minBalance = 0;
     if (customer && customer.balance <= minBalance) {
