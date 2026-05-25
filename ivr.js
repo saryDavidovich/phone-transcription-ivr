@@ -82,17 +82,44 @@ router.get('/', async (call) => {
 });
 
 async function getEmailByKeypad(call) {
-    const input = await call.read([{
+    const localPart = await call.read([{
         type: 'text',
-        data: 'הקלד את כתובת המייל שלך לפי מקשי הטלפון לנקודה הקש 1 לאט אם שתי פעמים הקש כוכבית ביניהם לסיום הקש סולמית'
-    }], 'tap', { max_digits: 100, terminate_keys: ['#'] });
+        data: 'הקלד את כתובת המייל עד השטרודל ולסיום הקש סולמית'
+    }], 'tap', { max_digits: 50, terminate_keys: ['#'] });
 
-    const email = decodeEmail(input);
-    console.log('email input:', input, '-> decoded:', email);
+    const decoded = decodeEmail(localPart);
+    console.log('local part:', localPart, '-> decoded:', decoded);
 
+    const domainChoice = await call.read([{
+        type: 'text',
+        data: `לסיומת ג'ימייל הקש 1 לסיומת יאהו הקש 2 לסיומת וואלה הקש 3 לסיומת הוטמייל הקש 4 לסיומת אחרת הקש 5`
+    }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3, 4, 5] });
+
+    const domains = {
+        '1': 'gmail.com',
+        '2': 'yahoo.com',
+        '3': 'walla.com',
+        '4': 'hotmail.com',
+    };
+
+    let domain = '';
+    if (domainChoice === '5') {
+        const domainPart = await call.read([{
+            type: 'text',
+            data: 'הקלד את הסיומת ולסיום הקש סולמית'
+        }], 'tap', { max_digits: 50, terminate_keys: ['#'] });
+        domain = decodeEmail(domainPart);
+    } else {
+        domain = domains[domainChoice];
+    }
+
+    const email = `${decoded}@${domain}`;
+    console.log('final email:', email);
+
+    const emailSpoken = email.replace('@', ' שטרודל ').replace(/\./g, ' נקודה ');
     const confirm = await call.read([{
         type: 'text',
-        data: `המייל שהוקלד הוא ${email} לאישור הקש 1 להקלדה מחדש הקש 2`
+        data: `המייל שהוקלד הוא ${emailSpoken} לאישור הקש 1 להקלדה מחדש הקש 2`
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (confirm === '1') {
@@ -100,8 +127,7 @@ async function getEmailByKeypad(call) {
     } else {
         return await getEmailByKeypad(call);
     }
-}
-async function handleRecording(call, phone, customer) {
+}async function handleRecording(call, phone, customer) {
     const minBalance = 0;
     if (customer && customer.balance <= minBalance) {
         const choice = await call.read([{
