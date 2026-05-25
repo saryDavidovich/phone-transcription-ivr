@@ -4,8 +4,42 @@ const axios = require('axios');
 
 const app = express();
 const PYTHON_URL = process.env.PYTHON_URL || 'https://web-production-90272.up.railway.app';
+const YEMOT_USERNAME = process.env.YEMOT_USERNAME || '';
+const YEMOT_PASSWORD = process.env.YEMOT_PASSWORD || '';
 
 const router = YemotRouter({ printLog: true });
+
+// מיפוי מקשים לאותיות — כמו טלפון כשר
+const KEY_MAP = {
+    '1': ['.', '1'],
+    '2': ['a', 'b', 'c', '2'],
+    '3': ['d', 'e', 'f', '3'],
+    '4': ['g', 'h', 'i', '4'],
+    '5': ['j', 'k', 'l', '5'],
+    '6': ['m', 'n', 'o', '6'],
+    '7': ['p', 'q', 'r', 's', '7'],
+    '8': ['t', 'u', 'v', '8'],
+    '9': ['w', 'x', 'y', 'z', '9'],
+    '0': ['@', '_', '-', '0'],
+};
+
+// המרת רצף הקשות למייל
+// * מפריד בין מקשים עוקבים
+function decodeEmail(input) {
+    // מפצל לפי * שהוא מפריד
+    const parts = input.split('*');
+    let result = '';
+    for (const part of parts) {
+        if (!part) continue;
+        const key = part[0];
+        const count = part.length;
+        if (KEY_MAP[key]) {
+            const chars = KEY_MAP[key];
+            result += chars[(count - 1) % chars.length];
+        }
+    }
+    return result;
+}
 
 router.get('/', async (call) => {
     const phone = call.ApiPhone;
@@ -23,7 +57,8 @@ router.get('/', async (call) => {
             return;
         }
         if (customer.balance > 0) {
-            welcomeMsg += ` יתרתך היא ${customer.balance} שקל`;
+            const balance = Math.floor(customer.balance);
+            welcomeMsg += ` יתרתך היא ${balance} שקל`;
         }
     } catch (e) {
         console.error('customer error:', e.message);
@@ -40,6 +75,38 @@ router.get('/', async (call) => {
         await handleOptions(call, phone);
     }
 });
+
+async function getEmailByKeypad(call) {
+    await call.id_list_message([{
+        type: 'text',
+        data: 'הקלד את כתובת המייל שלך לפי מקשי הטלפון להפרדה בין מקשים עוקבים הקש כוכבית לסיום הקש סולמית'
+    }]);
+
+    const input = await call.read([{
+        type: 'text',
+        data: 'מתחיל הקלדה'
+    }], 'tap', { max_digits: 50, terminate_keys: ['#'] });
+
+    const email = decodeEmail(input);
+    console.log('email input:', input, '-> decoded:', email);
+
+    // קריאה לאישור
+    await call.id_list_message([{
+        type: 'text',
+        data: `המייל שהוקלד הוא ${email} לאישור הקש 1 להקלדה מחדש הקש 2`
+    }]);
+
+    const confirm = await call.read([{
+        type: 'text',
+        data: ''
+    }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+
+    if (confirm === '1') {
+        return email;
+    } else {
+        return await getEmailByKeypad(call);
+    }
+}
 
 async function handleRecording(call, phone, customer) {
     const minBalance = 0;
@@ -71,7 +138,7 @@ async function handleRecording(call, phone, customer) {
 
     let fullRecUrl = recPath;
     if (recPath && !recPath.startsWith('http')) {
-        fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${recPath}`;
+        fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?username=${YEMOT_USERNAME}&password=${YEMOT_PASSWORD}&path=ivr2:${recPath}`;
     }
     console.log('fullRecUrl:', fullRecUrl);
 
@@ -85,10 +152,7 @@ async function handleRecording(call, phone, customer) {
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (deliveryChoice === '1') {
-            const email = await call.read([{
-                type: 'text',
-                data: 'אמור בקול ברור את כתובת המייל שלך'
-            }], 'stt');
+            const email = await getEmailByKeypad(call);
             deliveryMethod = 'email';
             deliveredTo = email;
             try {
@@ -159,10 +223,7 @@ async function handleUpdateDetails(call, phone) {
     }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2] });
 
     if (choice === '1') {
-        const email = await call.read([{
-            type: 'text',
-            data: 'אמור בקול ברור את כתובת המייל שלך'
-        }], 'stt');
+        const email = await getEmailByKeypad(call);
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, {
                 phone, email, delivery_method: 'email'
