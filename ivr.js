@@ -92,7 +92,7 @@ async function getEmailByKeypad(call) {
 
     const domainChoice = await call.read([{
         type: 'text',
-        data: `לסיומת ג'ימייל הקש 1 לסיומת יאהו הקש 2 לסיומת וואלה הקש 3 לסיומת הוטמייל הקש 4 לסיומת אחרת הקש 5`
+        data: 'לסיומת גימייל הקש 1 לסיומת יאהו הקש 2 לסיומת וואלה הקש 3 לסיומת הוטמייל הקש 4 לסיומת אחרת הקש 5'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3, 4, 5] });
 
     const domains = {
