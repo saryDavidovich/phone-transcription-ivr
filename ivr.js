@@ -24,13 +24,20 @@ const KEY_MAP = {
 // המרת רצף הקשות למייל
 // * מפריד בין מקשים עוקבים
 function decodeEmail(input) {
-    // מפצל לפי * שהוא מפריד
-    const parts = input.split('*');
     let result = '';
-    for (const part of parts) {
-        if (!part) continue;
-        const key = part[0];
-        const count = part.length;
+    let i = 0;
+    while (i < input.length) {
+        if (input[i] === '*') {
+            i++;
+            continue;
+        }
+        const key = input[i];
+        let count = 0;
+        // סופר כמה פעמים אותו מקש ברצף
+        while (i < input.length && input[i] === key) {
+            count++;
+            i++;
+        }
         if (KEY_MAP[key]) {
             const chars = KEY_MAP[key];
             result += chars[(count - 1) % chars.length];
