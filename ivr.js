@@ -4,8 +4,6 @@ const axios = require('axios');
 
 const app = express();
 const PYTHON_URL = process.env.PYTHON_URL || 'https://web-production-90272.up.railway.app';
-const YEMOT_USERNAME = process.env.YEMOT_USERNAME || '';
-const YEMOT_PASSWORD = process.env.YEMOT_PASSWORD || '';
 
 const router = YemotRouter({ printLog: true });
 
@@ -138,7 +136,7 @@ async function handleRecording(call, phone, customer) {
 
     let fullRecUrl = recPath;
     if (recPath && !recPath.startsWith('http')) {
-        fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?username=${YEMOT_USERNAME}&password=${YEMOT_PASSWORD}&path=ivr2:${recPath}`;
+        fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${recPath}`;
     }
     console.log('fullRecUrl:', fullRecUrl);
 
