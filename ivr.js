@@ -85,7 +85,7 @@ async function getEmailByKeypad(call) {
     const localPart = await call.read([{
         type: 'text',
         data: 'הקלד את כתובת המייל עד השטרודל ולסיום הקש סולמית'
-    }], 'tap', { max_digits: 50 });
+    }], 'tap', { max_digits: 100, sec_wait: 7 });
 
     const decoded = decodeEmail(localPart);
     console.log('local part:', localPart, '-> decoded:', decoded);
