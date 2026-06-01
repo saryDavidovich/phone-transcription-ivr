@@ -128,12 +128,7 @@ async function handleRecording(call, phone, customer) {
     const transcriptionTier = tierChoice === '2' ? 'premium' : 'basic';
     console.log('transcription tier:', transcriptionTier);
 
-    if (transcriptionTier === 'premium') {
-        await call.id_list_message([{
-            type: 'text',
-            data: 'בחרת תמלול מקצועי התמלול יישלח אליך תוך מספר דקות'
-        }]);
-    }
+    // אין צורך בהודעה נפרדת — ממשיך להקלטה
     // ===========================
 
     const recPath = await call.read([{
