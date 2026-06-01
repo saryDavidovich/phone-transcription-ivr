@@ -7,7 +7,6 @@ const PYTHON_URL = process.env.PYTHON_URL || 'https://web-production-90272.up.ra
 
 const router = YemotRouter({ printLog: true });
 
-// מיפוי מקשים לאותיות — כמו טלפון כשר
 const KEY_MAP = {
     '1': ['.', '1'],
     '2': ['a', 'b', 'c', '2'],
@@ -21,23 +20,14 @@ const KEY_MAP = {
     '0': ['@', '_', '-', '0'],
 };
 
-// המרת רצף הקשות למייל
-// * מפריד בין מקשים עוקבים
 function decodeEmail(input) {
     let result = '';
     let i = 0;
     while (i < input.length) {
-        if (input[i] === '*') {
-            i++;
-            continue;
-        }
+        if (input[i] === '*') { i++; continue; }
         const key = input[i];
         let count = 0;
-        // סופר כמה פעמים אותו מקש ברצף
-        while (i < input.length && input[i] === key) {
-            count++;
-            i++;
-        }
+        while (i < input.length && input[i] === key) { count++; i++; }
         if (KEY_MAP[key]) {
             const chars = KEY_MAP[key];
             result += chars[(count - 1) % chars.length];
@@ -55,10 +45,7 @@ router.get('/', async (call) => {
         const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
         customer = res.data;
         if (customer.is_blocked) {
-            await call.id_list_message([{
-                type: 'text',
-                data: 'מצטערים חשבונך חסום לפרטים פנה לשירות לקוחות'
-            }]);
+            await call.id_list_message([{ type: 'text', data: 'מצטערים חשבונך חסום לפרטים פנה לשירות לקוחות' }]);
             return;
         }
         if (customer.balance > 0) {
@@ -88,19 +75,13 @@ async function getEmailByKeypad(call) {
     }], 'tap', { max_digits: 100, sec_wait: 7 });
 
     const decoded = decodeEmail(localPart);
-    console.log('local part:', localPart, '-> decoded:', decoded);
 
     const domainChoice = await call.read([{
         type: 'text',
         data: 'לסיומת גימייל הקש 1 לסיומת יאהו הקש 2 לסיומת וואלה הקש 3 לסיומת הוטמייל הקש 4 לסיומת אחרת הקש 5'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3, 4, 5] });
 
-    const domains = {
-        '1': 'gmail.com',
-        '2': 'yahoo.com',
-        '3': 'walla.com',
-        '4': 'hotmail.com',
-    };
+    const domains = { '1': 'gmail.com', '2': 'yahoo.com', '3': 'walla.com', '4': 'hotmail.com' };
 
     let domain = '';
     if (domainChoice === '5') {
@@ -114,20 +95,17 @@ async function getEmailByKeypad(call) {
     }
 
     const email = `${decoded}@${domain}`;
-    console.log('final email:', email);
-
     const emailSpoken = email.replace('@', ' שטרודל ').replace(/\./g, ' נקודה ');
     const confirm = await call.read([{
         type: 'text',
         data: `המייל שהוקלד הוא ${emailSpoken} לאישור הקש 1 להקלדה מחדש הקש 2`
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
-    if (confirm === '1') {
-        return email;
-    } else {
-        return await getEmailByKeypad(call);
-    }
-}async function handleRecording(call, phone, customer) {
+    if (confirm === '1') return email;
+    return await getEmailByKeypad(call);
+}
+
+async function handleRecording(call, phone, customer) {
     const minBalance = 0;
     if (customer && customer.balance <= minBalance) {
         const choice = await call.read([{
@@ -136,13 +114,27 @@ async function getEmailByKeypad(call) {
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (choice === '1') {
-            await call.id_list_message([{
-                type: 'text',
-                data: 'לטעינת ארנק פנה למנהל המערכת שיחה טובה'
-            }]);
+            await call.id_list_message([{ type: 'text', data: 'לטעינת ארנק פנה למנהל המערכת שיחה טובה' }]);
             return;
         }
     }
+
+    // ===== בחירת סוג תמלול =====
+    const tierChoice = await call.read([{
+        type: 'text',
+        data: 'לתמלול רגיל הקש 1 לתמלול מקצועי עם זיהוי מושגים תורניים וארמית הקש 2'
+    }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+
+    const transcriptionTier = tierChoice === '2' ? 'premium' : 'basic';
+    console.log('transcription tier:', transcriptionTier);
+
+    if (transcriptionTier === 'premium') {
+        await call.id_list_message([{
+            type: 'text',
+            data: 'בחרת תמלול מקצועי התמלול יישלח אליך תוך מספר דקות'
+        }]);
+    }
+    // ===========================
 
     const recPath = await call.read([{
         type: 'text',
@@ -159,7 +151,6 @@ async function getEmailByKeypad(call) {
     if (recPath && !recPath.startsWith('http')) {
         fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${recPath}`;
     }
-    console.log('fullRecUrl:', fullRecUrl);
 
     let deliveryMethod = customer ? customer.delivery_method : 'email';
     let deliveredTo = customer ? (customer.email || customer.fax || '') : '';
@@ -175,9 +166,7 @@ async function getEmailByKeypad(call) {
             deliveryMethod = 'email';
             deliveredTo = email;
             try {
-                await axios.post(`${PYTHON_URL}/api/customer/update`, {
-                    phone, email, delivery_method: 'email'
-                });
+                await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' });
             } catch (e) {}
         } else {
             const fax = await call.read([{
@@ -187,9 +176,7 @@ async function getEmailByKeypad(call) {
             deliveryMethod = 'fax';
             deliveredTo = fax;
             try {
-                await axios.post(`${PYTHON_URL}/api/customer/update`, {
-                    phone, fax, delivery_method: 'fax'
-                });
+                await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax, delivery_method: 'fax' });
             } catch (e) {}
         }
     }
@@ -200,7 +187,8 @@ async function getEmailByKeypad(call) {
             rec_url: fullRecUrl,
             call_id: call.ApiCallId,
             delivery_method: deliveryMethod,
-            delivered_to: deliveredTo
+            delivered_to: deliveredTo,
+            transcription_tier: transcriptionTier  // ← חדש!
         });
     } catch (e) {
         console.error('transcribe error:', e.message);
@@ -219,17 +207,11 @@ async function handleOptions(call, phone) {
     }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
     if (choice === '1') {
-        await call.id_list_message([{
-            type: 'text',
-            data: 'לטעינת ארנק פנה למנהל המערכת שיחה טובה'
-        }]);
+        await call.id_list_message([{ type: 'text', data: 'לטעינת ארנק פנה למנהל המערכת שיחה טובה' }]);
     } else if (choice === '2') {
         await handleUpdateDetails(call, phone);
     } else if (choice === '3') {
-        await call.id_list_message([{
-            type: 'text',
-            data: 'מערכת זו מאפשרת להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס שיחה טובה'
-        }]);
+        await call.id_list_message([{ type: 'text', data: 'מערכת זו מאפשרת להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס שיחה טובה' }]);
     } else {
         await call.go_to_folder('/');
     }
@@ -244,28 +226,18 @@ async function handleUpdateDetails(call, phone) {
     if (choice === '1') {
         const email = await getEmailByKeypad(call);
         try {
-            await axios.post(`${PYTHON_URL}/api/customer/update`, {
-                phone, email, delivery_method: 'email'
-            });
+            await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' });
         } catch (e) {}
-        await call.id_list_message([{
-            type: 'text',
-            data: 'המייל עודכן בהצלחה שיחה טובה'
-        }]);
+        await call.id_list_message([{ type: 'text', data: 'המייל עודכן בהצלחה שיחה טובה' }]);
     } else if (choice === '2') {
         const fax = await call.read([{
             type: 'text',
             data: 'הקש את מספר הפקס שלך ולאחר מכן הקש סולמית'
         }], 'tap', { max_digits: 15 });
         try {
-            await axios.post(`${PYTHON_URL}/api/customer/update`, {
-                phone, fax, delivery_method: 'fax'
-            });
+            await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax, delivery_method: 'fax' });
         } catch (e) {}
-        await call.id_list_message([{
-            type: 'text',
-            data: 'הפקס עודכן בהצלחה שיחה טובה'
-        }]);
+        await call.id_list_message([{ type: 'text', data: 'הפקס עודכן בהצלחה שיחה טובה' }]);
     } else {
         await handleOptions(call, phone);
     }
