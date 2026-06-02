@@ -49,8 +49,13 @@ router.get('/', async (call) => {
             return;
         }
         if (customer.balance > 0) {
-            const balance = Math.floor(customer.balance);
-            welcomeMsg += ` יתרתך היא ${balance} שקל`;
+            const balanceShekel = Math.floor(customer.balance);
+            const balanceAgorot = Math.round((customer.balance - balanceShekel) * 100);
+            if (balanceAgorot > 0) {
+                welcomeMsg += ` יתרתך היא ${balanceShekel} שקל ו-${balanceAgorot} אגורות`;
+            } else {
+                welcomeMsg += ` יתרתך היא ${balanceShekel} שקל`;
+            }
         }
     } catch (e) {
         console.error('customer error:', e.message);
