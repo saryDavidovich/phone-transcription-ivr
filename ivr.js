@@ -52,7 +52,7 @@ router.get('/', async (call) => {
             const balanceShekel = Math.floor(customer.balance);
             const balanceAgorot = Math.round((customer.balance - balanceShekel) * 100);
             if (balanceAgorot > 0) {
-                welcomeMsg += ` יתרתך היא ${balanceShekel} שקל ו-${balanceAgorot} אגורות`;
+                welcomeMsg += ` יתרתך היא ${balanceShekel} שקל ו ${balanceAgorot} אגורות`;
             } else {
                 welcomeMsg += ` יתרתך היא ${balanceShekel} שקל`;
             }
