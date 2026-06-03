@@ -80,7 +80,43 @@ async function getEmailByKeypad(call) {
     }], 'tap', { max_digits: 100, sec_wait: 7 });
 
     const decoded = decodeEmail(localPart);
+    return await getDomainAndConfirmEmail(call, decoded, 'כתיבה');
+}
 
+async function getEmailByVoice(call) {
+    const recPath = await call.read([{
+        type: 'text',
+        data: 'הקליט את שם המייל שלך עד השטרודל לאחר הצליל ולסיום הקש סולמית שים לב ייתכן והזיהוי לא יהיה מדויק'
+    }], 'record', {
+        no_confirm_menu: true,
+        save_on_hangup: false,
+        path: '/tmp_emails'
+    });
+
+    let recUrl = recPath;
+    if (recPath && !recPath.startsWith('http')) {
+        recUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${recPath}`;
+    }
+
+    try {
+        const res = await axios.post(`${PYTHON_URL}/api/extract-email-local`, { rec_url: recUrl });
+        const localPart = res.data.local_part || '';
+
+        if (!localPart) {
+            await call.id_list_message([{ type: 'text', data: 'לא הצלחנו לזהות את שם המייל נסו שוב' }]);
+            return await getEmailByVoice(call);
+        }
+
+        return await getDomainAndConfirmEmail(call, localPart, 'הקלטה');
+
+    } catch (e) {
+        console.error('extract email error:', e.message);
+        await call.id_list_message([{ type: 'text', data: 'אירעה שגיאה עוברים למצב כתיבה' }]);
+        return await getEmailByKeypad(call);
+    }
+}
+
+async function getDomainAndConfirmEmail(call, localPart, mode) {
     const domainChoice = await call.read([{
         type: 'text',
         data: 'לסיומת גימייל הקש 1 לסיומת יאהו הקש 2 לסיומת וואלה הקש 3 לסיומת הוטמייל הקש 4 לסיומת אחרת הקש 5'
@@ -99,15 +135,31 @@ async function getEmailByKeypad(call) {
         domain = domains[domainChoice];
     }
 
-    const email = `${decoded}@${domain}`;
+    const email = `${localPart}@${domain}`;
     const emailSpoken = email.replace('@', ' שטרודל ').replace(/\./g, ' נקודה ');
     const confirm = await call.read([{
         type: 'text',
-        data: `המייל שהוקלד הוא ${emailSpoken} לאישור הקש 1 להקלדה מחדש הקש 2`
+        data: `המייל שהתקבל הוא ${emailSpoken} לאישור הקש 1 לניסיון מחדש הקש 2`
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (confirm === '1') return email;
+
+    // ניסיון מחדש — חוזר לאותו מצב
+    if (mode === 'הקלטה') return await getEmailByVoice(call);
     return await getEmailByKeypad(call);
+}
+
+async function getEmail(call) {
+    const modeChoice = await call.read([{
+        type: 'text',
+        data: 'למצב הקלטה הקש 1 למצב כתיבה הקש 2'
+    }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+
+    if (modeChoice === '1') {
+        return await getEmailByVoice(call);
+    } else {
+        return await getEmailByKeypad(call);
+    }
 }
 
 async function handleRecording(call, phone, customer) {
@@ -124,7 +176,6 @@ async function handleRecording(call, phone, customer) {
         }
     }
 
-    // ===== בחירת סוג תמלול =====
     const tierChoice = await call.read([{
         type: 'text',
         data: 'לתמלול רגיל הקש 1 לתמלול מקצועי עם זיהוי מושגים תורניים וארמית הקש 2'
@@ -132,7 +183,6 @@ async function handleRecording(call, phone, customer) {
 
     const transcriptionTier = tierChoice === '2' ? 'premium' : 'basic';
 
-    // ===== הקלטה =====
     const recPath = await call.read([{
         type: 'text',
         data: 'השאר את הודעתך לאחר הצליל לסיום הקש סולמית או נתק'
@@ -149,7 +199,6 @@ async function handleRecording(call, phone, customer) {
         fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${recPath}`;
     }
 
-    // ===== קביעת שיטת משלוח =====
     let deliveryMethod = customer ? customer.delivery_method : '';
     let deliveredTo = '';
 
@@ -159,7 +208,6 @@ async function handleRecording(call, phone, customer) {
         deliveredTo = customer ? (customer.email || '') : '';
     }
 
-    // אם אין פרטי משלוח — שאל את הלקוח
     if (!deliveredTo) {
         const deliveryChoice = await call.read([{
             type: 'text',
@@ -167,7 +215,7 @@ async function handleRecording(call, phone, customer) {
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (deliveryChoice === '1') {
-            const email = await getEmailByKeypad(call);
+            const email = await getEmail(call);
             deliveryMethod = 'email';
             deliveredTo = email;
             try {
@@ -229,7 +277,7 @@ async function handleUpdateDetails(call, phone) {
     }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
     if (choice === '1') {
-        const email = await getEmailByKeypad(call);
+        const email = await getEmail(call);
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' });
         } catch (e) {}
