@@ -293,7 +293,7 @@ async function handleUpdateDetails(call, phone) {
 
     const choice = await call.read([{
         type: 'text',
-        data: `${emailMsg}. ${faxMsg}. לעדכון מייל הקש 1 לעדכון פקס הקש 2 לשינוי שיטת שליחה הקש 3 לחזרה הקש 0`
+        data: `${emailMsg} ${faxMsg} לעדכון מייל הקש 1 לעדכון פקס הקש 2 לשינוי שיטת שליחה הקש 3 לחזרה הקש 0`
     }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
     if (choice === '1') {
