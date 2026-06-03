@@ -283,9 +283,10 @@ async function handleUpdateDetails(call, phone) {
         customer = res.data;
     } catch (e) {}
 
-    const emailMsg = customer && customer.email
-        ? `המייל שלך הוא ${customer.email.replace('@', ' שטרודל ').replace(/\./g, ' נקודה ')}`
-        : 'לא מעודכן מייל';
+    const emailClean = customer && customer.email
+        ? customer.email.replace('@', ' שטרודל ').replace(/[.]/g, ' נקודה ')
+        : '';
+    const emailMsg = emailClean ? `המייל שלך הוא ${emailClean}` : 'לא מעודכן מייל';
     const faxMsg = customer && customer.fax
         ? `הפקס שלך הוא ${customer.fax}`
         : 'לא מעודכן פקס';
