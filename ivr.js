@@ -36,6 +36,13 @@ function decodeEmail(input) {
     return result;
 }
 
+function speakEmail(email) {
+    // מחליף @ ו-. בטקסט מדובר ללא תווים מיוחדים
+    return email
+        .replace('@', ' שטרודל ')
+        .replace(/\./g, ' נקודה ');
+}
+
 async function getEmailByKeypad(call) {
     const input = await call.read([{
         type: 'text',
@@ -45,7 +52,7 @@ async function getEmailByKeypad(call) {
     if (input === '*') {
         await call.id_list_message([{
             type: 'text',
-            data: 'יש להקליד לפי מקשי הטלפון. לאות A הקישו 2 פעם אחת. לאות B הקישו 2 פעמיים. לאות C הקישו 2 שלוש פעמים. לספרה 2 הקישו 2 ארבע פעמים. לאות D הקישו 3 פעם אחת. לאות E הקישו 3 פעמיים. לאות F הקישו 3 שלוש פעמים. לספרה 3 הקישו 3 ארבע פעמים. לנקודה הקישו 1 פעם אחת. לספרה 1 הקישו 1 פעמיים. לספרה 0 הקישו 0 פעם אחת'
+            data: 'יש להקליד לפי מקשי הטלפון לאות A הקישו 2 פעם אחת לאות B הקישו 2 פעמיים לאות C הקישו 2 שלוש פעמים לספרה 2 הקישו 2 ארבע פעמים לאות D הקישו 3 פעם אחת לאות E הקישו 3 פעמיים לאות F הקישו 3 שלוש פעמים לספרה 3 הקישו 3 ארבע פעמים לנקודה הקישו 1 פעם אחת לספרה 1 הקישו 1 פעמיים לספרה 0 הקישו 0 פעם אחת'
         }]);
         return await getEmailByKeypad(call);
     }
@@ -87,27 +94,71 @@ async function getEmailByVoice(call) {
     }
 }
 
+async function getDomainByVoice(call) {
+    const recPath = await call.read([{
+        type: 'text',
+        data: 'הקליט את סיומת המייל לאחר הצליל ולסיום הקש סולמית לדוגמה הקליט יאהו נקודה קום'
+    }], 'record', {
+        no_confirm_menu: true,
+        save_on_hangup: false,
+        path: '/tmp_emails'
+    });
+
+    let recUrl = recPath;
+    if (recPath && !recPath.startsWith('http')) {
+        recUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${recPath}`;
+    }
+
+    try {
+        const res = await axios.post(`${PYTHON_URL}/api/extract-email-local`, { rec_url: recUrl });
+        const domain = res.data.local_part || '';
+
+        if (!domain) {
+            await call.id_list_message([{ type: 'text', data: 'לא הצלחנו לזהות את הסיומת נסו שוב' }]);
+            return await getDomainByVoice(call);
+        }
+
+        const domainSpoken = speakEmail(domain);
+        const confirm = await call.read([{
+            type: 'text',
+            data: `הסיומת שזוהתה היא ${domainSpoken} לאישור הקש 1 לניסיון מחדש הקש 2`
+        }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+
+        if (confirm === '1') return domain;
+        return await getDomainByVoice(call);
+
+    } catch (e) {
+        console.error('extract domain error:', e.message);
+        return await getDomainByVoice(call);
+    }
+}
+
 async function getDomainAndConfirmEmail(call, localPart, mode) {
     const domainChoice = await call.read([{
         type: 'text',
-        data: 'לסיומת גימייל הקש 1 לסיומת יאהו הקש 2 לסיומת וואלה הקש 3 לסיומת הוטמייל הקש 4 לסיומת אחרת הקש 5'
+        data: 'לסיומת גימייל נקודה קום הקש 1 לסיומת יאהו נקודה קום הקש 2 לסיומת וואלה נקודה קום הקש 3 לסיומת הוטמייל נקודה קום הקש 4 לסיומת אחרת הקש 5'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3, 4, 5] });
 
     const domains = { '1': 'gmail.com', '2': 'yahoo.com', '3': 'walla.com', '4': 'hotmail.com' };
 
     let domain = '';
     if (domainChoice === '5') {
-        const domainPart = await call.read([{
-            type: 'text',
-            data: 'הקלד את הסיומת ולסיום הקש סולמית'
-        }], 'tap', { max_digits: 50, terminate_keys: ['#'] });
-        domain = decodeEmail(domainPart);
+        if (mode === 'הקלטה') {
+            domain = await getDomainByVoice(call);
+        } else {
+            const domainPart = await call.read([{
+                type: 'text',
+                data: 'הקלד את הסיומת ולסיום הקש סולמית'
+            }], 'tap', { max_digits: 50, terminate_keys: ['#'] });
+            domain = decodeEmail(domainPart);
+        }
     } else {
         domain = domains[domainChoice];
     }
 
     const email = `${localPart}@${domain}`;
-    const emailSpoken = email.replace('@', ' שטרודל ').replace(/\./g, ' נקודה ');
+    const emailSpoken = speakEmail(email);
+
     const confirm = await call.read([{
         type: 'text',
         data: `המייל שהתקבל הוא ${emailSpoken} לאישור הקש 1 לתיקון הקש 2`
@@ -272,7 +323,7 @@ async function handleOptions(call, phone) {
     } else if (choice === '3') {
         await call.id_list_message([{ type: 'text', data: 'מערכת זו מאפשרת להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס שיחה טובה' }]);
     } else {
-        await call.go_to_folder('/');
+        await call.id_list_message([{ type: 'text', data: 'להתחלה חייג שוב שיחה טובה' }]);
     }
 }
 
@@ -283,17 +334,14 @@ async function handleUpdateDetails(call, phone) {
         customer = res.data;
     } catch (e) {}
 
-    const emailClean = customer && customer.email
-        ? customer.email.replace('@', ' שטרודל ').replace(/[.]/g, ' נקודה ')
-        : '';
-    const emailMsg = emailClean ? `המייל שלך הוא ${emailClean}` : 'לא מעודכן מייל';
-    const faxMsg = customer && customer.fax
-        ? `הפקס שלך הוא ${customer.fax}`
-        : 'לא מעודכן פקס';
+    const emailSpoken = customer && customer.email ? speakEmail(customer.email) : '';
+    const emailMsg = emailSpoken ? `המייל שלך הוא ${emailSpoken}` : 'לא מעודכן מייל';
+    const faxMsg = customer && customer.fax ? `הפקס שלך הוא ${customer.fax}` : 'לא מעודכן פקס';
+    const deliveryMsg = customer && customer.delivery_method === 'fax' ? 'שיטת השליחה היא פקס' : 'שיטת השליחה היא מייל';
 
     const choice = await call.read([{
         type: 'text',
-        data: `${emailMsg} ${faxMsg} לעדכון מייל הקש 1 לעדכון פקס הקש 2 לשינוי שיטת שליחה הקש 3 לחזרה הקש 0`
+        data: `${emailMsg} ${faxMsg} ${deliveryMsg} לעדכון מייל הקש 1 לעדכון פקס הקש 2 לשינוי שיטת שליחה הקש 3 לחזרה הקש 0`
     }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
     if (choice === '1') {
@@ -301,10 +349,10 @@ async function handleUpdateDetails(call, phone) {
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' });
         } catch (e) {}
-        const emailSpoken = email.replace('@', ' שטרודל ').replace(/\./g, ' נקודה ');
+        const emailSpokenNew = speakEmail(email);
         const confirm = await call.read([{
             type: 'text',
-            data: `המייל שנשמר הוא ${emailSpoken} לאישור הקש 1 לתיקון הקש 2`
+            data: `המייל שנשמר הוא ${emailSpokenNew} לאישור הקש 1 לתיקון הקש 2`
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
         if (confirm === '2') return await handleUpdateDetails(call, phone);
         await call.id_list_message([{ type: 'text', data: 'המייל עודכן בהצלחה שיחה טובה' }]);
