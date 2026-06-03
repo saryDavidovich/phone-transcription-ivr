@@ -17,7 +17,7 @@ const KEY_MAP = {
     '7': ['p', 'q', 'r', 's', '7'],
     '8': ['t', 'u', 'v', '8'],
     '9': ['w', 'x', 'y', 'z', '9'],
-    '0': ['@', '_', '-', '0'],
+    '0': ['0'],
 };
 
 function decodeEmail(input) {
@@ -74,13 +74,38 @@ router.get('/', async (call) => {
 });
 
 async function getEmailByKeypad(call) {
-    const localPart = await call.read([{
+    // הוראות כתיבה
+    await call.read([{
+        type: 'text',
+        data: 'הקלד את כתובת המייל עד השטרודל ולסיום הקש סולמית להוראות כתיבה הקש כוכבית'
+    }], 'tap', { max_digits: 100, sec_wait: 7, terminate_keys: ['#', '*'] });
+
+    // בדיקה אם הקיש כוכבית להוראות
+    const localPart = await (async () => {
+        const input = await call.read([{
+            type: 'text',
+            data: 'הקלד את כתובת המייל עד השטרודל ולסיום הקש סולמית להוראות כתיבה הקש כוכבית'
+        }], 'tap', { max_digits: 100, sec_wait: 7, terminate_keys: ['#', '*'] });
+
+        if (input === '*') {
+            await call.id_list_message([{
+                type: 'text',
+                data: 'יש להקליד לפי מקשי הטלפון. לאות A הקישו 2 פעם אחת. לאות B הקישו 2 פעמיים. לאות C הקישו 2 שלוש פעמים. לספרה 2 הקישו 2 ארבע פעמים. לאות D הקישו 3 פעם אחת. לאות E הקישו 3 פעמיים. לאות F הקישו 3 שלוש פעמים. לספרה 3 הקישו 3 ארבע פעמים. לנקודה הקישו 1 פעם אחת. לספרה 1 הקישו 1 פעמיים. לספרה 0 הקישו 0 פעם אחת'
+            }]);
+            return await getEmailByKeypadInput(call);
+        }
+        return decodeEmail(input);
+    })();
+
+    return await getDomainAndConfirmEmail(call, localPart, 'כתיבה');
+}
+
+async function getEmailByKeypadInput(call) {
+    const input = await call.read([{
         type: 'text',
         data: 'הקלד את כתובת המייל עד השטרודל ולסיום הקש סולמית'
-    }], 'tap', { max_digits: 100, sec_wait: 7 });
-
-    const decoded = decodeEmail(localPart);
-    return await getDomainAndConfirmEmail(call, decoded, 'כתיבה');
+    }], 'tap', { max_digits: 100, sec_wait: 7, terminate_keys: ['#'] });
+    return decodeEmail(input);
 }
 
 async function getEmailByVoice(call) {
@@ -139,12 +164,11 @@ async function getDomainAndConfirmEmail(call, localPart, mode) {
     const emailSpoken = email.replace('@', ' שטרודל ').replace(/\./g, ' נקודה ');
     const confirm = await call.read([{
         type: 'text',
-        data: `המייל שהתקבל הוא ${emailSpoken} לאישור הקש 1 לניסיון מחדש הקש 2`
+        data: `המייל שהתקבל הוא ${emailSpoken} לאישור הקש 1 לתיקון הקש 2`
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (confirm === '1') return email;
 
-    // ניסיון מחדש — חוזר לאותו מצב
     if (mode === 'הקלטה') return await getEmailByVoice(call);
     return await getEmailByKeypad(call);
 }
@@ -271,9 +295,20 @@ async function handleOptions(call, phone) {
 }
 
 async function handleUpdateDetails(call, phone) {
+    // טעינת פרטי לקוח עדכניים
+    let customer = null;
+    try {
+        const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
+        customer = res.data;
+    } catch (e) {}
+
+    // הכנת הודעת פרטים קיימים
+    const emailMsg = customer && customer.email ? `המייל שלך הוא ${customer.email.replace('@', ' שטרודל ').replace(/\./g, ' נקודה ')}` : 'לא מעודכן מייל';
+    const faxMsg = customer && customer.fax ? `הפקס שלך הוא ${customer.fax}` : 'לא מעודכן פקס';
+
     const choice = await call.read([{
         type: 'text',
-        data: 'לעדכון מייל הקש 1 לעדכון פקס הקש 2 לשינוי שיטת שליחה הקש 3 לחזרה הקש 0'
+        data: `${emailMsg}. ${faxMsg}. לעדכון מייל הקש 1 לעדכון פקס הקש 2 לשינוי שיטת שליחה הקש 3 לחזרה הקש 0`
     }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
     if (choice === '1') {
@@ -281,6 +316,15 @@ async function handleUpdateDetails(call, phone) {
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' });
         } catch (e) {}
+        // אישור המייל המלא
+        const emailSpoken = email.replace('@', ' שטרודל ').replace(/\./g, ' נקודה ');
+        const confirm = await call.read([{
+            type: 'text',
+            data: `המייל שנשמר הוא ${emailSpoken} לאישור הקש 1 לתיקון הקש 2`
+        }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        if (confirm === '2') {
+            return await handleUpdateDetails(call, phone);
+        }
         await call.id_list_message([{ type: 'text', data: 'המייל עודכן בהצלחה שיחה טובה' }]);
 
     } else if (choice === '2') {
@@ -288,6 +332,17 @@ async function handleUpdateDetails(call, phone) {
             type: 'text',
             data: 'הקש את מספר הפקס שלך ולאחר מכן הקש סולמית'
         }], 'tap', { max_digits: 15, terminate_keys: ['#'] });
+
+        // אישור הפקס
+        const confirm = await call.read([{
+            type: 'text',
+            data: `מספר הפקס שהוקלד הוא ${fax} לאישור הקש 1 לתיקון הקש 2`
+        }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+
+        if (confirm === '2') {
+            return await handleUpdateDetails(call, phone);
+        }
+
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax, delivery_method: 'fax' });
         } catch (e) {}
@@ -314,6 +369,24 @@ async function handleUpdateDetails(call, phone) {
     } else {
         await handleOptions(call, phone);
     }
+}
+
+async function getEmailByKeypad(call) {
+    const input = await call.read([{
+        type: 'text',
+        data: 'הקלד את כתובת המייל עד השטרודל ולסיום הקש סולמית להוראות כתיבה הקש כוכבית'
+    }], 'tap', { max_digits: 100, sec_wait: 7, terminate_keys: ['#', '*'] });
+
+    if (input === '*') {
+        await call.id_list_message([{
+            type: 'text',
+            data: 'יש להקליד לפי מקשי הטלפון. לאות A הקישו 2 פעם אחת. לאות B הקישו 2 פעמיים. לאות C הקישו 2 שלוש פעמים. לספרה 2 הקישו 2 ארבע פעמים. לאות D הקישו 3 פעם אחת. לאות E הקישו 3 פעמיים. לאות F הקישו 3 שלוש פעמים. לספרה 3 הקישו 3 ארבע פעמים. לנקודה הקישו 1 פעם אחת. לספרה 1 הקישו 1 פעמיים. לספרה 0 הקישו 0 פעם אחת'
+        }]);
+        return await getEmailByKeypad(call);
+    }
+
+    const localPart = decodeEmail(input);
+    return await getDomainAndConfirmEmail(call, localPart, 'כתיבה');
 }
 
 app.use(router);
