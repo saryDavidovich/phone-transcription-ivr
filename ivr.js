@@ -39,38 +39,38 @@ function decodeEmail(input) {
 function speakEmail(email) {
     if (!email) return '';
 
+    // ללא ניקוד - ימות לא מסתדר עם תווי ניקוד
     const letterNames = {
-    'a': 'אֵי',
-    'b': 'בִּי',
-    'c': 'סִי',
-    'd': 'דִּי',
-    'e': 'אִי',
-    'f': 'אֶף',
-    'g': "גּ'י",
-    'h': 'אֵיץ\'',
-    'i': 'אַי',
-    'j': "גּ'יי",
-    'k': 'קֵיי',
-    'l': 'אֶל',
-    'm': 'אֶם',
-    'n': 'אֶן',
-    'o': 'אוֹ',
-    'p': 'פִּי',
-    'q': 'קְיוּ',
-    'r': 'אָר',
-    's': 'אֶס',
-    't': 'טִי',
-    'u': 'יוּ',
-    'v': 'וִי',
-    'w': 'דַּבְּלְיוּ',
-    'x': 'אֶקְס',
-    'y': 'וָאי',
-    'z': 'זִי'
-};
+        'a': 'אי',
+        'b': 'בי',
+        'c': 'סי',
+        'd': 'די',
+        'e': 'אי',
+        'f': 'אף',
+        'g': 'גי',
+        'h': 'אייץ',
+        'i': 'איי',
+        'j': 'גיי',
+        'k': 'קיי',
+        'l': 'אל',
+        'm': 'אם',
+        'n': 'אן',
+        'o': 'או',
+        'p': 'פי',
+        'q': 'קיו',
+        'r': 'אר',
+        's': 'אס',
+        't': 'טי',
+        'u': 'יו',
+        'v': 'וי',
+        'w': 'דאבליו',
+        'x': 'אקס',
+        'y': 'וואי',
+        'z': 'זי'
+    };
 
-    // תרגום סיומות נפוצות לעברית
     const domainTranslations = {
-        'gmail.com': 'ג׳ימייל נקודה כום',
+        'gmail.com': 'גימייל נקודה כום',
         'yahoo.com': 'יאהו נקודה כום',
         'walla.com': 'וואלה נקודה כום',
         'walla.co.il': 'וואלה נקודה קו נקודה איל',
@@ -78,12 +78,11 @@ function speakEmail(email) {
         'outlook.com': 'אאוטלוק נקודה כום',
         'icloud.com': 'איקלאוד נקודה כום',
         'bezeqint.net': 'בזקאינט נקודה נט',
-        'netvision.net.il': 'נטוויז׳ן נקודה נט נקודה איל',
+        'netvision.net.il': 'נטוויזן נקודה נט נקודה איל',
     };
 
     const atIndex = email.indexOf('@');
     if (atIndex === -1) {
-        // אין שטרודל — איות של הכל
         return email.split('').map(ch => {
             const lower = ch.toLowerCase();
             return letterNames[lower] || ch;
@@ -93,14 +92,12 @@ function speakEmail(email) {
     const localPart = email.substring(0, atIndex);
     const domain = email.substring(atIndex + 1).toLowerCase();
 
-    // החלק לפני השטרודל — איות אות אות
     const spokenLocal = localPart.split('').map(ch => {
         const lower = ch.toLowerCase();
         if (letterNames[lower]) return letterNames[lower];
-        return ch; // מספרים ונקודות נשארים כמו שהם
+        return ch;
     }).join(' ');
 
-    // הסיומת — תרגום ידוע או קריאה רגילה עם החלפת נקודה
     const spokenDomain = domainTranslations[domain] ||
         domain.replace(/\./g, ' נקודה ');
 
@@ -108,7 +105,6 @@ function speakEmail(email) {
 }
 
 async function getEmailByKeypad(call) {
-    // שלב 1 — שאל אם רוצה הוראות
     const helpChoice = await call.read([{
         type: 'text',
         data: 'להוראות כתיבה הקש 1 להתחיל להקליד הקש 2'
@@ -121,7 +117,6 @@ async function getEmailByKeypad(call) {
         }]);
     }
 
-    // שלב 2 — קבל קלט
     const input = await call.read([{
         type: 'text',
         data: 'הקלד את כתובת המייל עד השטרודל ולסיום הקש סולמית'
@@ -398,6 +393,7 @@ async function handleOptions(call, phone) {
 }
 
 async function handleUpdateDetails(call, phone) {
+    // טוען נתוני לקוח עדכניים בכל כניסה לתפריט
     let customer = null;
     try {
         const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
@@ -419,7 +415,9 @@ async function handleUpdateDetails(call, phone) {
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' });
         } catch (e) {}
-        await call.id_list_message([{ type: 'text', data: 'המייל עודכן בהצלחה שיחה טובה' }]);
+        // מודיע ואז חוזר לתפריט עדכון פרטים
+        await call.id_list_message([{ type: 'text', data: 'המייל עודכן בהצלחה' }]);
+        return await handleUpdateDetails(call, phone);
 
     } else if (choice === '2') {
         const fax = await call.read([{
@@ -434,7 +432,9 @@ async function handleUpdateDetails(call, phone) {
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax, delivery_method: 'fax' });
         } catch (e) {}
-        await call.id_list_message([{ type: 'text', data: 'הפקס עודכן בהצלחה שיחה טובה' }]);
+        // מודיע ואז חוזר לתפריט עדכון פרטים
+        await call.id_list_message([{ type: 'text', data: 'הפקס עודכן בהצלחה' }]);
+        return await handleUpdateDetails(call, phone);
 
     } else if (choice === '3') {
         const methodChoice = await call.read([{
@@ -446,15 +446,18 @@ async function handleUpdateDetails(call, phone) {
             try {
                 await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, delivery_method: 'email' });
             } catch (e) {}
-            await call.id_list_message([{ type: 'text', data: 'שיטת השליחה עודכנה למייל שיחה טובה' }]);
+            await call.id_list_message([{ type: 'text', data: 'שיטת השליחה עודכנה למייל' }]);
         } else {
             try {
                 await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, delivery_method: 'fax' });
             } catch (e) {}
-            await call.id_list_message([{ type: 'text', data: 'שיטת השליחה עודכנה לפקס שיחה טובה' }]);
+            await call.id_list_message([{ type: 'text', data: 'שיטת השליחה עודכנה לפקס' }]);
         }
+        // חוזר לתפריט עדכון פרטים
+        return await handleUpdateDetails(call, phone);
 
     } else {
+        // 0 = חזרה לתפריט אפשרויות
         await handleOptions(call, phone);
     }
 }
