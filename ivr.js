@@ -41,7 +41,7 @@ function speakEmail(email) {
 
     // ללא ניקוד - ימות לא מסתדר עם תווי ניקוד
     const letterNames = {
-        'a': 'אי',
+        'a': 'אֵי',
         'b': 'בי',
         'c': 'סי',
         'd': 'די',
