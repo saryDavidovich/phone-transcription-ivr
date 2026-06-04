@@ -265,14 +265,9 @@ router.get('/', async (call) => {
 });
 
 async function handleManagerMessage(call, phone, customer) {
-    await call.id_list_message([{
-        type: 'text',
-        data: 'השאר הודעתך למנהל לאחר הצליל לסיום הקש סולמית'
-    }]);
-
     const recPath = await call.read([{
         type: 'text',
-        data: ''
+        data: 'השאר הודעתך למנהל לאחר הצליל לסיום הקש סולמית'
     }], 'record', {
         no_confirm_menu: true,
         save_on_hangup: true,
