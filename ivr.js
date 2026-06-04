@@ -38,9 +38,52 @@ function decodeEmail(input) {
 
 function speakEmail(email) {
     if (!email) return '';
-    return email
-        .replace('@', ' שטרודל ')
-        .replace(/\./g, ' נקודה ');
+
+    const letterNames = {
+        'a': 'אי', 'b': 'בי', 'c': 'סי', 'd': 'די', 'e': 'אי',
+        'f': 'אף', 'g': 'ג׳י', 'h': 'אייץ', 'i': 'איי', 'j': 'ג׳יי',
+        'k': 'קיי', 'l': 'אל', 'm': 'אם', 'n': 'אן', 'o': 'אוו',
+        'p': 'פי', 'q': 'קיו', 'r': 'אר', 's': 'אס', 't': 'טי',
+        'u': 'יו', 'v': 'וי', 'w': 'דאבליו', 'x': 'אקס', 'y': 'וואי', 'z': 'זי'
+    };
+
+    // תרגום סיומות נפוצות לעברית
+    const domainTranslations = {
+        'gmail.com': 'ג׳ימייל נקודה כום',
+        'yahoo.com': 'יאהו נקודה כום',
+        'walla.com': 'וואלה נקודה כום',
+        'walla.co.il': 'וואלה נקודה קו נקודה איל',
+        'hotmail.com': 'הוטמייל נקודה כום',
+        'outlook.com': 'אאוטלוק נקודה כום',
+        'icloud.com': 'איקלאוד נקודה כום',
+        'bezeqint.net': 'בזקאינט נקודה נט',
+        'netvision.net.il': 'נטוויז׳ן נקודה נט נקודה איל',
+    };
+
+    const atIndex = email.indexOf('@');
+    if (atIndex === -1) {
+        // אין שטרודל — איות של הכל
+        return email.split('').map(ch => {
+            const lower = ch.toLowerCase();
+            return letterNames[lower] || ch;
+        }).join(' ');
+    }
+
+    const localPart = email.substring(0, atIndex);
+    const domain = email.substring(atIndex + 1).toLowerCase();
+
+    // החלק לפני השטרודל — איות אות אות
+    const spokenLocal = localPart.split('').map(ch => {
+        const lower = ch.toLowerCase();
+        if (letterNames[lower]) return letterNames[lower];
+        return ch; // מספרים ונקודות נשארים כמו שהם
+    }).join(' ');
+
+    // הסיומת — תרגום ידוע או קריאה רגילה עם החלפת נקודה
+    const spokenDomain = domainTranslations[domain] ||
+        domain.replace(/\./g, ' נקודה ');
+
+    return `${spokenLocal} שטרודל ${spokenDomain}`;
 }
 
 async function getEmailByKeypad(call) {
@@ -124,7 +167,7 @@ async function getDomainByVoice(call) {
             return await getDomainByVoice(call);
         }
 
-        const domainSpoken = speakEmail(domain);
+        const domainSpoken = speakEmail('@' + domain).replace('שטרודל ', '');
         const confirm = await call.read([{
             type: 'text',
             data: `הסיומת שזוהתה היא ${domainSpoken} לאישור הקש 1 לניסיון מחדש הקש 2`
@@ -351,7 +394,6 @@ async function handleUpdateDetails(call, phone) {
     }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
     if (choice === '1') {
-        // getEmail כבר כולל אישור פנימי — אין צורך באישור נוסף
         const email = await getEmail(call);
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' });
