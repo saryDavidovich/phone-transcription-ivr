@@ -39,34 +39,12 @@ function decodeEmail(input) {
 function speakEmail(email) {
     if (!email) return '';
 
-    // ללא ניקוד - ימות לא מסתדר עם תווי ניקוד
     const letterNames = {
-        'a': 'a',
-        'b': 'b',
-        'c': 'c',
-        'd': 'd',
-        'e': 'e',
-        'f': 'f',
-        'g': 'g',
-        'h': 'h',
-        'i': 'i',
-        'j': 'j',
-        'k': 'k',
-        'l': 'l',
-        'm': 'm',
-        'n': 'n',
-        'o': 'o',
-        'p': 'p',
-        'q': 'q',
-        'r': 'r',
-        's': 's',
-        't': 't',
-        'u': 'u',
-        'v': 'v',
-        'w': 'w',
-        'x': 'x',
-        'y': 'y',
-        'z': 'z'
+        'a': 'a', 'b': 'b', 'c': 'c', 'd': 'd', 'e': 'e',
+        'f': 'f', 'g': 'g', 'h': 'h', 'i': 'i', 'j': 'j',
+        'k': 'k', 'l': 'l', 'm': 'm', 'n': 'n', 'o': 'o',
+        'p': 'p', 'q': 'q', 'r': 'r', 's': 's', 't': 't',
+        'u': 'u', 'v': 'v', 'w': 'w', 'x': 'x', 'y': 'y', 'z': 'z'
     };
 
     const domainTranslations = {
@@ -274,15 +252,57 @@ router.get('/', async (call) => {
 
     const choice = await call.read([{
         type: 'text',
-        data: `${welcomeMsg} להתחלת הקלטה הקש 1 לתפריט אפשרויות הקש 2`
-    }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        data: `${welcomeMsg} להתחלת הקלטה הקש 1 לתפריט אפשרויות הקש 2 להשארת הודעה למנהל הקש 9`
+    }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 9] });
 
     if (choice === '1') {
         await handleRecording(call, phone, customer);
+    } else if (choice === '9') {
+        await handleManagerMessage(call, phone, customer);
     } else {
         await handleOptions(call, phone);
     }
 });
+
+async function handleManagerMessage(call, phone, customer) {
+    await call.id_list_message([{
+        type: 'text',
+        data: 'השאר הודעתך למנהל לאחר הצליל לסיום הקש סולמית'
+    }]);
+
+    const recPath = await call.read([{
+        type: 'text',
+        data: ''
+    }], 'record', {
+        no_confirm_menu: true,
+        save_on_hangup: true,
+        path: '/manager_messages'
+    });
+
+    let fullRecUrl = recPath;
+    if (recPath && !recPath.startsWith('http')) {
+        fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${recPath}`;
+    }
+
+    try {
+        await axios.post(`${PYTHON_URL}/api/manager-message`, {
+            phone,
+            rec_url: fullRecUrl,
+            call_id: call.ApiCallId,
+            email: customer ? (customer.email || '') : '',
+            fax: customer ? (customer.fax || '') : '',
+            delivery_method: customer ? (customer.delivery_method || '') : '',
+            name: customer ? (customer.name || '') : ''
+        });
+    } catch (e) {
+        console.error('manager message error:', e.message);
+    }
+
+    await call.id_list_message([{
+        type: 'text',
+        data: 'הודעתך התקבלה המנהל יחזור אליך בהקדם שיחה טובה'
+    }]);
+}
 
 async function handleRecording(call, phone, customer) {
     const minBalance = 0;
@@ -393,7 +413,6 @@ async function handleOptions(call, phone) {
 }
 
 async function handleUpdateDetails(call, phone) {
-    // טוען נתוני לקוח עדכניים בכל כניסה לתפריט
     let customer = null;
     try {
         const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
@@ -415,7 +434,6 @@ async function handleUpdateDetails(call, phone) {
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' });
         } catch (e) {}
-        // מודיע ואז חוזר לתפריט עדכון פרטים
         await call.id_list_message([{ type: 'text', data: 'המייל עודכן בהצלחה' }]);
         return await handleUpdateDetails(call, phone);
 
@@ -432,7 +450,6 @@ async function handleUpdateDetails(call, phone) {
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax, delivery_method: 'fax' });
         } catch (e) {}
-        // מודיע ואז חוזר לתפריט עדכון פרטים
         await call.id_list_message([{ type: 'text', data: 'הפקס עודכן בהצלחה' }]);
         return await handleUpdateDetails(call, phone);
 
@@ -453,11 +470,9 @@ async function handleUpdateDetails(call, phone) {
             } catch (e) {}
             await call.id_list_message([{ type: 'text', data: 'שיטת השליחה עודכנה לפקס' }]);
         }
-        // חוזר לתפריט עדכון פרטים
         return await handleUpdateDetails(call, phone);
 
     } else {
-        // 0 = חזרה לתפריט אפשרויות
         await handleOptions(call, phone);
     }
 }
