@@ -280,7 +280,8 @@ async function handleManagerMessage(call, phone, customer) {
     // בונים את ה-URL בדיוק כמו הקלטות רגילות
     let fullRecUrl = recPath;
     if (recPath && !recPath.startsWith('http')) {
-        fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${recPath}`;
+    const cleanPath = recPath.startsWith('/') ? recPath : `/${recPath}`;
+    fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${cleanPath}`;
     }
 
     console.log('manager fullRecUrl:', fullRecUrl);
