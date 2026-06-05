@@ -274,15 +274,22 @@ async function handleManagerMessage(call, phone, customer) {
         path: '/manager_messages'
     });
 
+    console.log('manager recPath:', recPath);
+
+    // recPath הוא הנתיב האמיתי של הקובץ כמו /manager_messages/006
+    // בונים את ה-URL בדיוק כמו הקלטות רגילות
     let fullRecUrl = recPath;
     if (recPath && !recPath.startsWith('http')) {
         fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${recPath}`;
     }
 
+    console.log('manager fullRecUrl:', fullRecUrl);
+
     try {
         await axios.post(`${PYTHON_URL}/api/manager-message`, {
             phone,
-            rec_url: fullRecUrl,
+            rec_url: fullRecUrl,       // ה-URL המלא לשמיעה/הורדה
+            rec_path: recPath,         // הנתיב הגולמי לצורך debugging
             call_id: call.ApiCallId,
             email: customer ? (customer.email || '') : '',
             fax: customer ? (customer.fax || '') : '',
