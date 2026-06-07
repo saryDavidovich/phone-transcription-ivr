@@ -266,13 +266,14 @@ router.get('/', async (call) => {
 
 async function handleManagerMessage(call, phone, customer) {
     const recPath = await call.read([{
-        type: 'text',
-        data: 'השאר הודעתך למנהל לאחר הצליל לסיום הקש סולמית'
-    }], 'record', {
-        no_confirm_menu: true,
-        save_on_hangup: true,
-        path: '/manager_messages'
-    });
+    type: 'text',
+    data: 'השאר הודעתך למנהל לאחר הצליל לסיום הקש סולמית'
+}], 'record', {
+    no_confirm_menu: true,
+    save_on_hangup: true,
+    path: '/manager_messages',
+    file_name: call.ApiCallId    // ← הקובץ יישמר בשם call_id
+});
 
     console.log('manager recPath:', recPath);
 
