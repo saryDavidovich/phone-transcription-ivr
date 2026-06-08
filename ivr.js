@@ -266,23 +266,21 @@ router.get('/', async (call) => {
 
 async function handleManagerMessage(call, phone, customer) {
     const recPath = await call.read([{
-    type: 'text',
-    data: 'השאר הודעתך למנהל לאחר הצליל לסיום הקש סולמית'
-}], 'record', {
-    no_confirm_menu: true,
-    save_on_hangup: true,
-    path: '/manager_messages',
-    file_name: call.ApiCallId    // ← הקובץ יישמר בשם call_id
-});
+        type: 'text',
+        data: 'השאר הודעתך למנהל לאחר הצליל לסיום הקש סולמית'
+    }], 'record', {
+        no_confirm_menu: true,
+        save_on_hangup: true,
+        path: '/manager_messages',
+        file_name: call.ApiCallId
+    });
 
     console.log('manager recPath:', recPath);
 
-    // recPath הוא הנתיב האמיתי של הקובץ כמו /manager_messages/006
-    // בונים את ה-URL בדיוק כמו הקלטות רגילות
     let fullRecUrl = recPath;
     if (recPath && !recPath.startsWith('http')) {
-    const cleanPath = recPath.startsWith('/') ? recPath : `/${recPath}`;
-    fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${cleanPath}`;
+        const cleanPath = recPath.startsWith('/') ? recPath : `/${recPath}`;
+        fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${cleanPath}`;
     }
 
     console.log('manager fullRecUrl:', fullRecUrl);
@@ -290,8 +288,8 @@ async function handleManagerMessage(call, phone, customer) {
     try {
         await axios.post(`${PYTHON_URL}/api/manager-message`, {
             phone,
-            rec_url: fullRecUrl,       // ה-URL המלא לשמיעה/הורדה
-            rec_path: recPath,         // הנתיב הגולמי לצורך debugging
+            rec_url: fullRecUrl,
+            rec_path: recPath,
             call_id: call.ApiCallId,
             email: customer ? (customer.email || '') : '',
             fax: customer ? (customer.fax || '') : '',
@@ -328,6 +326,16 @@ async function handleRecording(call, phone, customer) {
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     const transcriptionTier = tierChoice === '2' ? 'premium' : 'basic';
+
+    // בחירת שפה — רק לתמלול מקצועי
+    let language = 'he';
+    if (transcriptionTier === 'premium') {
+        const langChoice = await call.read([{
+            type: 'text',
+            data: 'לתמלול בעברית הקש 1 ביידיש הקש 2 באנגלית הקש 3'
+        }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
+        language = langChoice === '2' ? 'yi' : langChoice === '3' ? 'en' : 'he';
+    }
 
     const recPath = await call.read([{
         type: 'text',
@@ -387,7 +395,8 @@ async function handleRecording(call, phone, customer) {
             call_id: call.ApiCallId,
             delivery_method: deliveryMethod,
             delivered_to: deliveredTo,
-            transcription_tier: transcriptionTier
+            transcription_tier: transcriptionTier,
+            language: language
         });
     } catch (e) {
         console.error('transcribe error:', e.message);
