@@ -329,14 +329,29 @@ async function handleRecording(call, phone, customer) {
 
     // בחירת שפה — לתמלול מקצועי וגמיני
     let language = 'he';
+    let outputLanguage = 'he'; // שפת הפלט
     if (transcriptionTier === 'premium' || transcriptionTier === 'gemini') {
         const langChoice = await call.read([{
             type: 'text',
             data: 'לתמלול בעברית הקש 1 ביידיש הקש 2 באנגלית הקש 3'
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
         language = langChoice === '2' ? 'yi' : langChoice === '3' ? 'en' : 'he';
-    }
 
+        // שפת פלט — רק אם בחר יידיש או אנגלית
+        if (language === 'yi') {
+            const outChoice = await call.read([{
+                type: 'text',
+                data: 'לקבל את התמלול ביידיש הקש 1 בעברית הקש 2'
+            }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+            outputLanguage = outChoice === '2' ? 'he' : 'yi';
+        } else if (language === 'en') {
+            const outChoice = await call.read([{
+                type: 'text',
+                data: 'לקבל את התמלול באנגלית הקש 1 בעברית הקש 2'
+            }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+            outputLanguage = outChoice === '2' ? 'he' : 'en';
+        }
+    }
     const recPath = await call.read([{
         type: 'text',
         data: 'השאר את הודעתך לאחר הצליל לסיום הקש סולמית או נתק'
@@ -397,6 +412,7 @@ async function handleRecording(call, phone, customer) {
             delivered_to: deliveredTo,
             transcription_tier: transcriptionTier,
             language: language
+            output_language: outputLanguage
         });
     } catch (e) {
         console.error('transcribe error:', e.message);
