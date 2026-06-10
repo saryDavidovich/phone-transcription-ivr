@@ -322,10 +322,10 @@ async function handleRecording(call, phone, customer) {
 
     const tierChoice = await call.read([{
         type: 'text',
-        data: 'לתמלול רגיל הקש 1 לתמלול מקצועי עם זיהוי מושגים תורניים וארמית הקש 2'
-    }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        data: 'לתמלול רגיל הקש 1 לתמלול מקצועי סופר אי איי הקש 2 לתמלול מתקדם גמיני הקש 3'
+    }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
 
-    const transcriptionTier = tierChoice === '2' ? 'premium' : 'basic';
+    const transcriptionTier = tierChoice === '2' ? 'premium' : tierChoice === '3' ? 'gemini' : 'basic';
 
     // בחירת שפה — רק לתמלול מקצועי
     let language = 'he';
