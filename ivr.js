@@ -327,9 +327,9 @@ async function handleRecording(call, phone, customer) {
 
     const transcriptionTier = tierChoice === '2' ? 'premium' : tierChoice === '3' ? 'gemini' : 'basic';
 
-    // בחירת שפה — רק לתמלול מקצועי
+    // בחירת שפה — לתמלול מקצועי וגמיני
     let language = 'he';
-    if (transcriptionTier === 'premium') {
+    if (transcriptionTier === 'premium' || transcriptionTier === 'gemini') {
         const langChoice = await call.read([{
             type: 'text',
             data: 'לתמלול בעברית הקש 1 ביידיש הקש 2 באנגלית הקש 3'
