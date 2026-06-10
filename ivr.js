@@ -411,7 +411,7 @@ async function handleRecording(call, phone, customer) {
             delivery_method: deliveryMethod,
             delivered_to: deliveredTo,
             transcription_tier: transcriptionTier,
-            language: language
+            language: language,
             output_language: outputLanguage
         });
     } catch (e) {
