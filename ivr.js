@@ -322,15 +322,15 @@ async function handleRecording(call, phone, customer) {
 
     const tierChoice = await call.read([{
         type: 'text',
-        data: 'לתמלול רגיל הקש 1 לתמלול מקצועי סופר אי איי הקש 2 לתמלול מתקדם גמיני הקש 3'
-    }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
+        data: 'לתמלול רגיל הקש 1 לתמלול מקצועי הקש 2'
+    }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
-    const transcriptionTier = tierChoice === '2' ? 'premium' : tierChoice === '3' ? 'gemini' : 'basic';
+    const transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
 
     // בחירת שפה — לתמלול מקצועי וגמיני
     let language = 'he';
     let outputLanguage = 'he'; // שפת הפלט
-    if (transcriptionTier === 'premium' || transcriptionTier === 'gemini') {
+   if (transcriptionTier === 'premium' || transcriptionTier === 'gemini' || transcriptionTier === 'basic') {
         const langChoice = await call.read([{
             type: 'text',
             data: 'לתמלול בעברית הקש 1 ביידיש הקש 2 באנגלית הקש 3'
