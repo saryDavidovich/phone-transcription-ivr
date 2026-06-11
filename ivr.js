@@ -250,15 +250,20 @@ router.get('/', async (call) => {
         console.error('customer error:', e.message);
     }
 
+    const ADMIN_PHONE = '0527134491';
+    const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 9] : [1, 2, 9];
+
     const choice = await call.read([{
         type: 'text',
         data: `${welcomeMsg} להתחלת הקלטה הקש 1 לתפריט אפשרויות הקש 2 להשארת הודעה למנהל הקש 9`
-    }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 9] });
+    }], 'tap', { max_digits: 1, digits_allowed: allowedDigits });
 
     if (choice === '1') {
         await handleRecording(call, phone, customer);
     } else if (choice === '9') {
         await handleManagerMessage(call, phone, customer);
+    } else if (choice === '0' && phone === ADMIN_PHONE) {
+        await handleAdminMessages(call);
     } else {
         await handleOptions(call, phone);
     }
@@ -503,6 +508,46 @@ async function handleUpdateDetails(call, phone) {
 
     } else {
         await handleOptions(call, phone);
+    }
+}
+
+async function handleAdminMessages(call) {
+    const msgId = await call.read([{
+        type: 'text',
+        data: 'הקש את מספר ההודעה ולסיום הקש סולמית'
+    }], 'tap', { max_digits: 10, terminate_keys: ['#'] });
+
+    if (!msgId) {
+        await call.id_list_message([{ type: 'text', data: 'לא הוקש מספר שיחה טובה' }]);
+        return;
+    }
+
+    try {
+        const res = await axios.get(`${PYTHON_URL}/api/manager-message-callid/${msgId}`);
+        const callId = res.data.call_id;
+
+        if (!callId) {
+            await call.id_list_message([{ type: 'text', data: 'הודעה לא נמצאה שיחה טובה' }]);
+            return;
+        }
+
+        await call.id_list_message([{
+            type: 'file',
+            data: `/manager_messages/${callId}`
+        }]);
+
+    } catch (e) {
+        console.error('admin messages error:', e.message);
+        await call.id_list_message([{ type: 'text', data: 'שגיאה בטעינת ההודעה שיחה טובה' }]);
+    }
+
+    const again = await call.read([{
+        type: 'text',
+        data: 'לשמיעת הודעה נוספת הקש 1 לסיום הקש 2'
+    }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+
+    if (again === '1') {
+        await handleAdminMessages(call);
     }
 }
 
