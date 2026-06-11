@@ -531,16 +531,19 @@ async function handleAdminMessages(call) {
             return;
         }
 
-        await call.read([{
+        await call.id_list_message([{
             type: 'file',
             data: `ivr2:/manager_messages/${callId}`
-        }], 'tap', { max_digits: 1, digits_allowed: [1, 2], sec_wait: 10 });
+        }]);
 
     } catch (e) {
         console.error('admin messages error:', e.message);
-        await call.id_list_message([{ type: 'text', data: 'שגיאה בטעינת ההודעה שיחה טובה' }]);
+        if (!e.message.includes('hangup')) {
+            await call.id_list_message([{ type: 'text', data: 'שגיאה בטעינת ההודעה שיחה טובה' }]);
+        }
+        return;
     }
-
+    
     const again = await call.read([{
         type: 'text',
         data: 'לשמיעת הודעה נוספת הקש 1 לסיום הקש 2'
