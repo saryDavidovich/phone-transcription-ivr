@@ -523,7 +523,7 @@ async function handleAdminMessages(call) {
     }
 
     try {
-        const res = await axios.get(`${PYTHON_URL}/api/manager-message-callid/${msgId}`);
+        const res = await axios.get(`${PYTHON_URL}/api/get-msg/${msgId}`);
         const callId = res.data.call_id;
 
         if (!callId) {
