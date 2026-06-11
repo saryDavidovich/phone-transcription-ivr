@@ -531,10 +531,10 @@ async function handleAdminMessages(call) {
             return;
         }
 
-        await call.id_list_message([{
+        await call.read([{
             type: 'file',
-            data: `/manager_messages/${callId}`
-        }]);
+            data: `ivr2:/manager_messages/${callId}`
+        }], 'tap', { max_digits: 1, digits_allowed: [1, 2], sec_wait: 10 });
 
     } catch (e) {
         console.error('admin messages error:', e.message);
