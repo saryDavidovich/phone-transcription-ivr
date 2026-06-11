@@ -120,7 +120,7 @@ async function getEmailByVoice(call) {
     }
 
     try {
-        const res = await axios.post(`${PYTHON_URL}/api/extract-email-domain`, { rec_url: recUrl });
+        const res = await axios.post(`${PYTHON_URL}/api/extract-email-local`, { rec_url: recUrl });
         const localPart = res.data.local_part || '';
 
         if (!localPart) {
@@ -153,7 +153,7 @@ async function getDomainByVoice(call) {
     }
 
     try {
-        const res = await axios.post(`${PYTHON_URL}/api/extract-email-local`, { rec_url: recUrl });
+        const res = await axios.post(`${PYTHON_URL}/api/extract-email-domain`, { rec_url: recUrl });
         const domain = res.data.local_part || '';
 
         if (!domain) {
