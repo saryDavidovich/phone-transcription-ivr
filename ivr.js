@@ -534,11 +534,11 @@ async function handleAdminMessages(call) {
         return;
     }
 
-    await call.id_list_message([{
+    try {
+        await call.id_list_message([{
             type: 'file',
             data: `manager_messages/${msgId}`
         }]);
-
     } catch (e) {
         console.error('admin messages error:', e.message);
         if (!e.message.includes('hangup')) {
@@ -546,7 +546,7 @@ async function handleAdminMessages(call) {
         }
         return;
     }
-    
+
     const again = await call.read([{
         type: 'text',
         data: 'לשמיעת הודעה נוספת הקש 1 לסיום הקש 2'
@@ -556,7 +556,6 @@ async function handleAdminMessages(call) {
         await handleAdminMessages(call);
     }
 }
-
 app.use(router);
 
 const PORT = process.env.PORT || 3000;
