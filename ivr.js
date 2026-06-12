@@ -270,6 +270,18 @@ router.get('/', async (call) => {
 });
 
 async function handleManagerMessage(call, phone, customer) {
+    // קבל מספר ID לפני ההקלטה
+    let msgId = call.ApiCallId;
+    try {
+        const idRes = await axios.post(`${PYTHON_URL}/api/manager-message-reserve`, {
+            phone,
+            call_id: call.ApiCallId
+        });
+        msgId = idRes.data.id;
+    } catch (e) {
+        console.error('reserve error:', e.message);
+    }
+
     const recPath = await call.read([{
         type: 'text',
         data: 'השאר הודעתך למנהל לאחר הצליל לסיום הקש סולמית'
@@ -277,7 +289,7 @@ async function handleManagerMessage(call, phone, customer) {
         no_confirm_menu: true,
         save_on_hangup: true,
         path: '/manager_messages',
-        file_name: call.ApiCallId
+        file_name: String(msgId)
     });
 
     console.log('manager recPath:', recPath);
@@ -522,18 +534,9 @@ async function handleAdminMessages(call) {
         return;
     }
 
-    try {
-        const res = await axios.get(`${PYTHON_URL}/api/get-msg/${msgId}`);
-        const callId = res.data.call_id;
-
-        if (!callId) {
-            await call.id_list_message([{ type: 'text', data: 'הודעה לא נמצאה שיחה טובה' }]);
-            return;
-        }
-
-        await call.id_list_message([{
+    await call.id_list_message([{
             type: 'file',
-            data: `ivr2:/manager_messages/${callId}`
+            data: `manager_messages/${msgId}`
         }]);
 
     } catch (e) {
