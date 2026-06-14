@@ -322,7 +322,7 @@ async function handleManagerMessage(call, phone, customer) {
 
     await call.id_list_message([
         { type: 'text', data: 'הודעתך התקבלה המנהל יחזור אליך בהקדם שיחה טובה' },
-        { type: 'go_to_folder', data: 'hangup' }
+        { type: 'go_to_folder', data: '/' }
     ]);
 }
 
@@ -443,7 +443,7 @@ async function handleRecording(call, phone, customer) {
 
     await call.id_list_message([
         { type: 'text', data: 'ההקלטה התקבלה התמלול ישלח אליך בקרוב שיחה טובה' },
-        { type: 'go_to_folder', data: 'hangup' }
+        { type: 'go_to_folder', data: '/' }
     ]);
 }
 
@@ -463,12 +463,11 @@ async function handleOptions(call, phone) {
     } else if (choice === '3') {
         await call.id_list_message([
             { type: 'text', data: 'מערכת זו מאפשרת להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס שיחה טובה' },
-            { type: 'go_to_folder', data: 'hangup' }
+            { type: 'go_to_folder', data: '/' }
         ]);
     } else {
         await call.id_list_message([
-            { type: 'text', data: 'להתחלה חייג שוב שיחה טובה' },
-            { type: 'go_to_folder', data: 'hangup' }
+            { type: 'go_to_folder', data: '/' }
         ]);
     }
 }
@@ -561,7 +560,7 @@ async function handleAdminMessages(call) {
         if (!e.message.includes('hangup')) {
             await call.id_list_message([
                 { type: 'text', data: 'שגיאה בטעינת ההודעה שיחה טובה' },
-                { type: 'go_to_folder', data: 'hangup' }
+                { type: 'go_to_folder', data: '/' }
             ]);
         }
         return;
@@ -574,6 +573,10 @@ async function handleAdminMessages(call) {
 
     if (again === '1') {
         await handleAdminMessages(call);
+    } else {
+        await call.id_list_message([
+            { type: 'go_to_folder', data: '/' }
+        ]);
     }
 }
 app.use(router);
