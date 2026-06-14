@@ -254,15 +254,20 @@ router.get('/', async (call) => {
     }
 
     const ADMIN_PHONE = '0527134491';
-    const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 9] : [1, 2, 9];
+    const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 9] : [1, 2, 3, 9];
 
     const choice = await call.read([{
         type: 'text',
-        data: `${welcomeMsg} להתחלת הקלטה הקש 1 לתפריט אפשרויות הקש 2 להשארת הודעה למנהל הקש 9`
+        data: `${welcomeMsg} להתחלת הקלטה הקש 1 לתפריט אפשרויות הקש 2 להסבר על המערכת הקש 3 להשארת הודעה למנהל הקש 9`
     }], 'tap', { max_digits: 1, digits_allowed: allowedDigits });
 
     if (choice === '1') {
         await handleRecording(call, phone, customer);
+    } else if (choice === '3') {
+        await call.id_list_message([
+            { type: 'text', data: 'מערכת זו מאפשרת להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס שיחה טובה' },
+            { type: 'go_to_folder', data: '/' }
+        ]);
     } else if (choice === '9') {
         await handleManagerMessage(call, phone, customer);
     } else if (choice === '0' && phone === ADMIN_PHONE) {
@@ -450,8 +455,8 @@ async function handleRecording(call, phone, customer) {
 async function handleOptions(call, phone) {
     const choice = await call.read([{
         type: 'text',
-        data: 'לטעינת ארנק הקש 1 לעדכון פרטים הקש 2 להסבר על המערכת הקש 3 לחזרה הקש 0'
-    }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
+        data: 'לטעינת ארנק הקש 1 לעדכון פרטים הקש 2 לחזרה הקש 0'
+    }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2] });
 
     if (choice === '1') {
         await call.id_list_message([
@@ -460,11 +465,6 @@ async function handleOptions(call, phone) {
         ]);
     } else if (choice === '2') {
         await handleUpdateDetails(call, phone);
-    } else if (choice === '3') {
-        await call.id_list_message([
-            { type: 'text', data: 'מערכת זו מאפשרת להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס שיחה טובה' },
-            { type: 'go_to_folder', data: '/' }
-        ]);
     } else {
         await call.id_list_message([
             { type: 'go_to_folder', data: '/' }
