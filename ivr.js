@@ -92,7 +92,7 @@ async function getEmailByKeypad(call) {
         await call.id_list_message([{
             type: 'text',
             data: 'יש להקליד לפי מקשי הטלפון לאות A הקישו 2 פעם אחת לאות B הקישו 2 פעמיים לאות C הקישו 2 שלוש פעמים לספרה 2 הקישו 2 ארבע פעמים לאות D הקישו 3 פעם אחת לאות E הקישו 3 פעמיים לאות F הקישו 3 שלוש פעמים לספרה 3 הקישו 3 ארבע פעמים לנקודה הקישו 1 פעם אחת לספרה 1 הקישו 1 פעמיים לספרה 0 הקישו 0 פעם אחת'
-        }]);
+        }], { prependToNextAction: true });
     }
 
     const input = await call.read([{
@@ -124,7 +124,7 @@ async function getEmailByVoice(call) {
         const localPart = res.data.local_part || '';
 
         if (!localPart) {
-            await call.id_list_message([{ type: 'text', data: 'לא הצלחנו לזהות את שם המייל נסו שוב' }]);
+            await call.id_list_message([{ type: 'text', data: 'לא הצלחנו לזהות את שם המייל נסו שוב' }], { prependToNextAction: true });
             return await getEmailByVoice(call);
         }
 
@@ -132,7 +132,7 @@ async function getEmailByVoice(call) {
 
     } catch (e) {
         console.error('extract email error:', e.message);
-        await call.id_list_message([{ type: 'text', data: 'אירעה שגיאה עוברים למצב כתיבה' }]);
+        await call.id_list_message([{ type: 'text', data: 'אירעה שגיאה עוברים למצב כתיבה' }], { prependToNextAction: true });
         return await getEmailByKeypad(call);
     }
 }
@@ -157,7 +157,7 @@ async function getDomainByVoice(call) {
         const domain = res.data.local_part || '';
 
         if (!domain) {
-            await call.id_list_message([{ type: 'text', data: 'לא הצלחנו לזהות את הסיומת נסו שוב' }]);
+            await call.id_list_message([{ type: 'text', data: 'לא הצלחנו לזהות את הסיומת נסו שוב' }], { prependToNextAction: true });
             return await getDomainByVoice(call);
         }
 
@@ -234,7 +234,10 @@ router.get('/', async (call) => {
         const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
         customer = res.data;
         if (customer.is_blocked) {
-            await call.id_list_message([{ type: 'text', data: 'מצטערים חשבונך חסום לפרטים פנה לשירות לקוחות' }]);
+            await call.id_list_message([
+                { type: 'text', data: 'מצטערים חשבונך חסום לפרטים פנה לשירות לקוחות' },
+                { type: 'go_to_folder', data: 'hangup' }
+            ]);
             return;
         }
         if (customer.balance > 0) {
@@ -317,10 +320,10 @@ async function handleManagerMessage(call, phone, customer) {
         console.error('manager message error:', e.message);
     }
 
-    await call.id_list_message([{
-        type: 'text',
-        data: 'הודעתך התקבלה המנהל יחזור אליך בהקדם שיחה טובה'
-    }]);
+    await call.id_list_message([
+        { type: 'text', data: 'הודעתך התקבלה המנהל יחזור אליך בהקדם שיחה טובה' },
+        { type: 'go_to_folder', data: 'hangup' }
+    ]);
 }
 
 async function handleRecording(call, phone, customer) {
@@ -332,7 +335,10 @@ async function handleRecording(call, phone, customer) {
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (choice === '1') {
-            await call.id_list_message([{ type: 'text', data: 'לטעינת ארנק פנה למנהל המערכת שיחה טובה' }]);
+            await call.id_list_message([
+                { type: 'text', data: 'לטעינת ארנק פנה למנהל המערכת שיחה טובה' },
+                { type: 'go_to_folder', data: 'hangup' }
+            ]);
             return;
         }
     }
@@ -435,10 +441,10 @@ async function handleRecording(call, phone, customer) {
         console.error('transcribe error:', e.message);
     }
 
-    await call.id_list_message([{
-        type: 'text',
-        data: 'ההקלטה התקבלה התמלול ישלח אליך בקרוב שיחה טובה'
-    }]);
+    await call.id_list_message([
+        { type: 'text', data: 'ההקלטה התקבלה התמלול ישלח אליך בקרוב שיחה טובה' },
+        { type: 'go_to_folder', data: 'hangup' }
+    ]);
 }
 
 async function handleOptions(call, phone) {
@@ -448,13 +454,22 @@ async function handleOptions(call, phone) {
     }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
     if (choice === '1') {
-        await call.id_list_message([{ type: 'text', data: 'לטעינת ארנק פנה למנהל המערכת שיחה טובה' }]);
+        await call.id_list_message([
+            { type: 'text', data: 'לטעינת ארנק פנה למנהל המערכת שיחה טובה' },
+            { type: 'go_to_folder', data: 'hangup' }
+        ]);
     } else if (choice === '2') {
         await handleUpdateDetails(call, phone);
     } else if (choice === '3') {
-        await call.id_list_message([{ type: 'text', data: 'מערכת זו מאפשרת להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס שיחה טובה' }]);
+        await call.id_list_message([
+            { type: 'text', data: 'מערכת זו מאפשרת להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס שיחה טובה' },
+            { type: 'go_to_folder', data: 'hangup' }
+        ]);
     } else {
-        await call.id_list_message([{ type: 'text', data: 'להתחלה חייג שוב שיחה טובה' }]);
+        await call.id_list_message([
+            { type: 'text', data: 'להתחלה חייג שוב שיחה טובה' },
+            { type: 'go_to_folder', data: 'hangup' }
+        ]);
     }
 }
 
@@ -480,7 +495,7 @@ async function handleUpdateDetails(call, phone) {
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' });
         } catch (e) {}
-        await call.id_list_message([{ type: 'text', data: 'המייל עודכן בהצלחה' }]);
+        await call.id_list_message([{ type: 'text', data: 'המייל עודכן בהצלחה' }], { prependToNextAction: true });
         return await handleUpdateDetails(call, phone);
 
     } else if (choice === '2') {
@@ -496,7 +511,7 @@ async function handleUpdateDetails(call, phone) {
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax, delivery_method: 'fax' });
         } catch (e) {}
-        await call.id_list_message([{ type: 'text', data: 'הפקס עודכן בהצלחה' }]);
+        await call.id_list_message([{ type: 'text', data: 'הפקס עודכן בהצלחה' }], { prependToNextAction: true });
         return await handleUpdateDetails(call, phone);
 
     } else if (choice === '3') {
@@ -509,12 +524,12 @@ async function handleUpdateDetails(call, phone) {
             try {
                 await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, delivery_method: 'email' });
             } catch (e) {}
-            await call.id_list_message([{ type: 'text', data: 'שיטת השליחה עודכנה למייל' }]);
+            await call.id_list_message([{ type: 'text', data: 'שיטת השליחה עודכנה למייל' }], { prependToNextAction: true });
         } else {
             try {
                 await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, delivery_method: 'fax' });
             } catch (e) {}
-            await call.id_list_message([{ type: 'text', data: 'שיטת השליחה עודכנה לפקס' }]);
+            await call.id_list_message([{ type: 'text', data: 'שיטת השליחה עודכנה לפקס' }], { prependToNextAction: true });
         }
         return await handleUpdateDetails(call, phone);
 
@@ -530,19 +545,24 @@ async function handleAdminMessages(call) {
     }], 'tap', { max_digits: 10, terminate_keys: ['#'] });
 
     if (!msgId) {
-        await call.id_list_message([{ type: 'text', data: 'לא הוקש מספר שיחה טובה' }]);
+        await call.id_list_message([
+            { type: 'text', data: 'לא הוקש מספר שיחה טובה' },
+            { type: 'go_to_folder', data: 'hangup' }
+        ]);
         return;
     }
 
     try {
-        await call.id_list_message([{
-            type: 'file',
-            data: `manager_messages/${msgId}`
-        }]);
+        await call.id_list_message([
+            { type: 'file', data: `manager_messages/${msgId}` }
+        ], { prependToNextAction: true });
     } catch (e) {
         console.error('admin messages error:', e.message);
         if (!e.message.includes('hangup')) {
-            await call.id_list_message([{ type: 'text', data: 'שגיאה בטעינת ההודעה שיחה טובה' }]);
+            await call.id_list_message([
+                { type: 'text', data: 'שגיאה בטעינת ההודעה שיחה טובה' },
+                { type: 'go_to_folder', data: 'hangup' }
+            ]);
         }
         return;
     }
