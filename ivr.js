@@ -82,6 +82,10 @@ function speakEmail(email) {
     return `${spokenLocal} שטרודל ${spokenDomain}`;
 }
 
+function speakDigits(value) {
+    return String(value || '').split('').join(' ');
+}
+
 async function getEmailByKeypad(call) {
     const helpChoice = await call.read([{
         type: 'text',
@@ -254,11 +258,11 @@ router.get('/', async (call) => {
     }
 
     const ADMIN_PHONE = '0527134491';
-    const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 9] : [1, 2, 3, 9];
+    const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 5, 9] : [1, 2, 3, 5, 9];
 
     const choice = await call.read([{
         type: 'text',
-        data: `${welcomeMsg} להתחלת הקלטה הקש 1 לתפריט אפשרויות הקש 2 להסבר על המערכת הקש 3 להשארת הודעה למנהל הקש 9`
+        data: `${welcomeMsg} להתחלת הקלטה הקש 1 לתפריט אפשרויות הקש 2 להסבר על המערכת הקש 3 לשליחת הקלטה במייל הקש 5 להשארת הודעה למנהל הקש 9`
     }], 'tap', { max_digits: 1, digits_allowed: allowedDigits });
 
     if (choice === '1') {
@@ -268,6 +272,8 @@ router.get('/', async (call) => {
             { type: 'text', data: 'מערכת זו מאפשרת להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס שיחה טובה' },
             { type: 'go_to_folder', data: '/' }
         ]);
+    } else if (choice === '5') {
+        await handleEmailInstructions(call, phone, customer);
     } else if (choice === '9') {
         await handleManagerMessage(call, phone, customer);
     } else if (choice === '0' && phone === ADMIN_PHONE) {
@@ -276,6 +282,55 @@ router.get('/', async (call) => {
         await handleOptions(call, phone);
     }
 });
+
+async function handleEmailInstructions(call, phone, customer) {
+    const hasEmail = !!(customer && customer.email);
+    const phoneSpoken = speakDigits(phone);
+
+    const explainMsg =
+        'ניתן לשלוח הקלטה לתמלול גם באמצעות מייל, ' +
+        'בלי להתקשר למערכת. שולחים מייל עם קובץ ההקלטה מצורף לכתובת המייל של המערכת, ' +
+        'ובשורת הנושא של המייל כותבים את מספר הטלפון שלך, ' +
+        `כלומר ${phoneSpoken}. ` +
+        'אפשר גם לציין בשורת הנושא, אחרי המספר, את סוג התמלול ואת שפת ההקלטה ושפת הפלט הרצויה. ' +
+        'התמלול יישלח בחזרה לאותה כתובת מייל שממנה נשלחה ההקלטה. ' +
+        'שימוש זה מתאפשר רק מכתובת מייל הרשומה ומעודכנת במערכת, ובתנאי שיש יתרה בארנק.';
+
+    if (hasEmail) {
+        const choice = await call.read([{
+            type: 'text',
+            data: `${explainMsg} לקבלת הוראות מפורטות עם דוגמאות וקישור ישיר למייל הקש 1 לחזרה לתפריט הראשי הקש 0`
+        }], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
+
+        if (choice === '1') {
+            try {
+                await axios.post(`${PYTHON_URL}/api/send-email-instructions`, { phone });
+                await call.id_list_message([
+                    { type: 'text', data: 'ההוראות המפורטות נשלחו לכתובת המייל שלך שיחה טובה' },
+                    { type: 'go_to_folder', data: '/' }
+                ]);
+            } catch (e) {
+                console.error('send-email-instructions error:', e.message);
+                await call.id_list_message([
+                    { type: 'text', data: 'אירעה שגיאה בשליחת ההוראות שיחה טובה' },
+                    { type: 'go_to_folder', data: '/' }
+                ]);
+            }
+            return;
+        }
+
+        await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
+
+    } else {
+        await call.id_list_message([
+            {
+                type: 'text',
+                data: `${explainMsg} כדי לקבל הוראות מפורטות במייל, יש לעדכן קודם כתובת מייל בתפריט עדכון פרטים, באמצעות תפריט אפשרויות.`
+            },
+            { type: 'go_to_folder', data: '/' }
+        ]);
+    }
+}
 
 async function handleManagerMessage(call, phone, customer) {
     // קבל מספר ID לפני ההקלטה
