@@ -288,7 +288,13 @@ async function handleEmailInstructions(call, phone, customer) {
     const phoneSpoken = speakDigits(phone);
 
     const explainMsg =
-        'ניתן לשלוח הקלטה לתמלול גם באמצעות מייל ' +
+        'ניתן
+        לשלוח
+        הקלטה 
+            לתמלול
+                גם
+                    באמצעות
+                        מייל ' +
         'בלי להתקשר למערכת שולחים מייל עם קובץ ההקלטה מצורף לכתובת המייל של המערכת ' +
         'ובשורת הנושא של המייל כותבים את מספר הטלפון שלך ' +
         `כלומר ${phoneSpoken} ` +
