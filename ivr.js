@@ -89,19 +89,19 @@ function speakDigits(value) {
 async function getEmailByKeypad(call) {
     const helpChoice = await call.read([{
         type: 'text',
-        data: 'לְהוֹרָאוֹת כְּתִיבָה הֵקֵש 1, לְהַתְחִיל לְהַקְלִיד הֵקֵש 2'
+        data: 'להוראות כתיבה הֵקֵש 1, להתחיל להקליד הֵקֵש 2'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (helpChoice === '1') {
         await call.id_list_message([{
             type: 'text',
-            data: 'יֵש לְהַקְלִיד לְפִי מַקְשֵׁי הַטֶּלֶפוֹן, לְאוֹת A הַקִּישׁוּ 2 פַּעַם אַחַת, לְאוֹת B הַקִּישׁוּ 2 פְּעָמַיִם, לְאוֹת C הַקִּישׁוּ 2 שָׁלוֹשׁ פְּעָמִים, לְסִפְרָה 2 הַקִּישׁוּ 2 אַרְבַּע פְּעָמִים, לְאוֹת D הַקִּישׁוּ 3 פַּעַם אַחַת, לְנְקוּדָּה הַקִּישׁוּ 1 פַּעַם אַחַת, לְסִפְרָה 0 הַקִּישׁוּ 0 פַּעַם אַחַת'
+            data: 'יש להקליד לפי מקשי הטלפון, לאות A הקישו 2 פעם אחת, לאות B הקישו 2 פעמיים, לאות C הקישו 2 שלוש פעמים, לספרה 2 הקישו 2 ארבע פעמים, לאות D הקישו 3 פעם אחת, לנקודה הקישו 1 פעם אחת, לספרה 0 הקישו 0 פעם אחת'
         }], { prependToNextAction: true });
     }
 
     const input = await call.read([{
         type: 'text',
-        data: 'הַקְלֵד אֶת כְּתוֹבֶת הַמֵּייל עַד הַשְּׁטְרוּדֶל, וּלְסִיּוּם הֵקֵש סוּלָמִית'
+        data: 'הקלד את כתובת המייל עד השטרודל, ולסיום הֵקֵש סולמית'
     }], 'tap', { max_digits: 100, sec_wait: 7, terminate_keys: ['#'] });
 
     const localPart = decodeEmail(input);
@@ -111,7 +111,7 @@ async function getEmailByKeypad(call) {
 async function getEmailByVoice(call) {
     const recPath = await call.read([{
         type: 'text',
-        data: 'הַקְלֵט אֶת שֵׁם הַמֵּייל שֶׁלְּךָ עַד הַשְּׁטְרוּדֶל, לְאַחַר הַצְּלִיל, וּלְסִיּוּם הֵקֵש סוּלָמִית, שִׂים לֵב יִיתָּכֵן וְהַזִּיהוּי לֹא יִהְיֶה מְדוּיָּק'
+        data: 'הקלט את שם המייל שלך עד השטרודל, לאחר הצליל, ולסיום הֵקֵש סולמית, שים לב ייתכן והזיהוי לא יהיה מדויק'
     }], 'record', {
         no_confirm_menu: true,
         save_on_hangup: false,
@@ -128,7 +128,7 @@ async function getEmailByVoice(call) {
         const localPart = res.data.local_part || '';
 
         if (!localPart) {
-            await call.id_list_message([{ type: 'text', data: 'לֹא הִצְלַחְנוּ לְזַהוֹת אֶת שֵׁם הַמֵּייל, נַסּוּ שׁוּב' }], { prependToNextAction: true });
+            await call.id_list_message([{ type: 'text', data: 'לא הצלחנו לזהות את שם המייל, נסו שוב' }], { prependToNextAction: true });
             return await getEmailByVoice(call);
         }
 
@@ -136,7 +136,7 @@ async function getEmailByVoice(call) {
 
     } catch (e) {
         console.error('extract email error:', e.message);
-        await call.id_list_message([{ type: 'text', data: 'אֵירְעָה שְׁגִיאָה, עוֹבְרִים לְמַצָּב כְּתִיבָה' }], { prependToNextAction: true });
+        await call.id_list_message([{ type: 'text', data: 'אירעה שגיאה, עוברים למצב כתיבה' }], { prependToNextAction: true });
         return await getEmailByKeypad(call);
     }
 }
@@ -144,7 +144,7 @@ async function getEmailByVoice(call) {
 async function getDomainByVoice(call) {
     const recPath = await call.read([{
         type: 'text',
-        data: 'הַקְלֵט אֶת סִיּוֹמֶת הַמֵּייל לְאַחַר הַצְּלִיל, וּלְסִיּוּם הֵקֵש סוּלָמִית, לְדוּגְמָה הַקְלֵט יָאהוּ נְקוּדָּה קוֹם'
+        data: 'הקלט את סיומת המייל לאחר הצליל, ולסיום הֵקֵש סולמית, לדוגמה הקלט יאהו נקודה קום'
     }], 'record', {
         no_confirm_menu: true,
         save_on_hangup: false,
@@ -161,14 +161,14 @@ async function getDomainByVoice(call) {
         const domain = res.data.local_part || '';
 
         if (!domain) {
-            await call.id_list_message([{ type: 'text', data: 'לֹא הִצְלַחְנוּ לְזַהוֹת אֶת הַסִּיּוֹמֶת, נַסּוּ שׁוּב' }], { prependToNextAction: true });
+            await call.id_list_message([{ type: 'text', data: 'לא הצלחנו לזהות את הסיומת, נסו שוב' }], { prependToNextAction: true });
             return await getDomainByVoice(call);
         }
 
         const domainSpoken = speakEmail('@' + domain).replace('שטרודל ', '');
         const confirm = await call.read([{
             type: 'text',
-            data: `הַסִּיּוֹמֶת שְּׁזוּהֲתָה הִיא ${domainSpoken}, לְאִישׁוּר הֵקֵש 1, לְנִיסָּיוֹן מֵחָדָשׁ הֵקֵש 2`
+            data: `הסיומת שזוהתה היא ${domainSpoken}, לאישור הֵקֵש 1, לניסיון מחדש הֵקֵש 2`
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (confirm === '1') return domain;
@@ -183,7 +183,7 @@ async function getDomainByVoice(call) {
 async function getDomainAndConfirmEmail(call, localPart, mode) {
     const domainChoice = await call.read([{
         type: 'text',
-        data: 'לְסִיּוֹמֶת גִּימֵייל נְקוּדָּה קוֹם הֵקֵש 1, לְסִיּוֹמֶת יָאהוּ נְקוּדָּה קוֹם הֵקֵש 2, לְסִיּוֹמֶת וָואלֶה נְקוּדָּה קוֹם הֵקֵש 3, לְסִיּוֹמֶת הוֹטְמֵייל נְקוּדָּה קוֹם הֵקֵש 4, לְסִיּוֹמֶת אַחֶרֶת הֵקֵש 5'
+        data: 'לסיומת גימייל נקודה קום הֵקֵש 1, לסיומת יאהו נקודה קום הֵקֵש 2, לסיומת וואלה נקודה קום הֵקֵש 3, לסיומת הוטמייל נקודה קום הֵקֵש 4, לסיומת אחרת הֵקֵש 5'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3, 4, 5] });
 
     const domains = { '1': 'gmail.com', '2': 'yahoo.com', '3': 'walla.com', '4': 'hotmail.com' };
@@ -195,7 +195,7 @@ async function getDomainAndConfirmEmail(call, localPart, mode) {
         } else {
             const domainPart = await call.read([{
                 type: 'text',
-                data: 'הַקְלֵד אֶת הַסִּיּוֹמֶת, וּלְסִיּוּם הֵקֵש סוּלָמִית'
+                data: 'הקלד את הסיומת, ולסיום הֵקֵש סולמית'
             }], 'tap', { max_digits: 50, terminate_keys: ['#'] });
             domain = decodeEmail(domainPart);
         }
@@ -208,7 +208,7 @@ async function getDomainAndConfirmEmail(call, localPart, mode) {
 
     const confirm = await call.read([{
         type: 'text',
-        data: `הַמֵּייל שֶׁהִתְקַבֵּל הוּא ${emailSpoken}, לְאִישׁוּר הֵקֵש 1, לְתִיקּוּן הֵקֵש 2`
+        data: `המייל שהתקבל הוא ${emailSpoken}, לאישור הֵקֵש 1, לתיקון הֵקֵש 2`
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (confirm === '1') return email;
@@ -219,7 +219,7 @@ async function getDomainAndConfirmEmail(call, localPart, mode) {
 async function getEmail(call) {
     const modeChoice = await call.read([{
         type: 'text',
-        data: 'לְמַצָּב הַקְלָטָה הֵקֵש 1, לְמַצָּב כְּתִיבָה הֵקֵש 2'
+        data: 'למצב הקלטה הֵקֵש 1, למצב כתיבה הֵקֵש 2'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (modeChoice === '1') {
@@ -233,13 +233,13 @@ router.get('/', async (call) => {
     const phone = call.ApiPhone;
 
     let customer = null;
-    let welcomeMsg = 'שָׁלוֹם וּבְרוּכִים הַבָּאִים לְמַעֲרֶכֶת הַתַּמְלוּל';
+    let welcomeMsg = 'שלום וברוכים הבאים למערכת התמלול';
     try {
         const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
         customer = res.data;
         if (customer.is_blocked) {
             await call.id_list_message([
-                { type: 'text', data: 'מִצְטַעֲרִים, חֶשְׁבּוֹנְךָ חָסוּם, לְפְרָטִים פְּנֵה לְשֵׁירוּת לְקוּחוֹת' },
+                { type: 'text', data: 'מצטערים, חשבונך חסום, לפרטים פנה לשירות לקוחות' },
                 { type: 'go_to_folder', data: 'hangup' }
             ]);
             return;
@@ -248,9 +248,9 @@ router.get('/', async (call) => {
             const balanceShekel = Math.floor(customer.balance);
             const balanceAgorot = Math.round((customer.balance - balanceShekel) * 100);
             if (balanceAgorot > 0) {
-                welcomeMsg += `, יִתְרָתְךָ הִיא ${balanceShekel} שֶׁקֶל וְ ${balanceAgorot} אֲגוֹרוֹת`;
+                welcomeMsg += `, יתרתך היא ${balanceShekel} שקל ו ${balanceAgorot} אגורות`;
             } else {
-                welcomeMsg += `, יִתְרָתְךָ הִיא ${balanceShekel} שֶׁקֶל`;
+                welcomeMsg += `, יתרתך היא ${balanceShekel} שקל`;
             }
         }
     } catch (e) {
@@ -262,14 +262,14 @@ router.get('/', async (call) => {
 
     const choice = await call.read([{
         type: 'text',
-        data: `${welcomeMsg}, לְהַתְחָלַת הַקְלָטָה הֵקֵש 1, לְתַפְרִיט אֶפְשָׁרוּיוֹת הֵקֵש 2, לְהֶסְבֵּר עַל הַמַּעֲרֶכֶת הֵקֵש 3, לִשְׁלִיחַת הַקְלָטָה בְּמֵייל הֵקֵש 5, לְהַשְׁאָרַת הוֹדָעָה לַמְנַהֵל הֵקֵש 9`
+        data: `${welcomeMsg}, להתחלת הקלטה הֵקֵש 1, לתפריט אפשרויות הֵקֵש 2, להסבר על המערכת הֵקֵש 3, לשליחת הקלטה במייל הֵקֵש 5, להשארת הודעה למנהל הֵקֵש 9`
     }], 'tap', { max_digits: 1, digits_allowed: allowedDigits });
 
     if (choice === '1') {
         await handleRecording(call, phone, customer);
     } else if (choice === '3') {
         await call.id_list_message([
-            { type: 'text', data: 'מַעֲרֶכֶת זוֹ מְאַפְשֶׁרֶת לְהַקְלִיט הוֹדָעוֹת שֶׁיְּתוּמְלְלוּ וְיִישָּׁלְחוּ אֵלֶיךָ לְמֵייל אוֹ לְפַקְס, שִׂיחָה טוֹבָה' },
+            { type: 'text', data: 'מערכת זו מאפשרת להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס, שיחה טובה' },
             { type: 'go_to_folder', data: '/' }
         ]);
     } else if (choice === '5') {
@@ -287,38 +287,32 @@ async function handleEmailInstructions(call, phone, customer) {
     const hasEmail = !!(customer && customer.email);
     const phoneSpoken = speakDigits(phone);
 
-    const explainMsg1 =
-        'נִיתָּן לִשְׁלוֹחַ הַקְלָטָה לְתַמְלוּל גַּם בְּאֶמְצָעוּת מֵייל, ' +
-        'בְּלִי לְהִתְקַשֵּׁר לַמַּעֲרֶכֶת, שׁוֹלְחִים מֵייל עִם קוֹבֶץ הַהַקְלָטָה מְצוֹרָף לְכְתוֹבֶת הַמֵּייל שֶׁל הַמַּעֲרֶכֶת, ' +
-        'וּבְשׁוּרַת הַנּוֹשֵׂא שֶׁל הַמֵּייל כּוֹתְבִים אֶת מִסְפַּר הַטֶּלֶפוֹן שֶׁלְּךָ, ' +
-        `כְּלוֹמַר ${phoneSpoken}`;
-
-    const explainMsg2 =
-        'אֶפְשָׁר גַּם לְצַיֵּן בְּשׁוּרַת הַנּוֹשֵׂא אַחֲרֵי הַמִּסְפָּר אֶת סוּג הַתַּמְלוּל וְאֶת שְׂפַת הַהַקְלָטָה וּשְׂפַת הַפְּלָט הָרְצוּיָה, ' +
-        'הַתַּמְלוּל יִישָּׁלַח בַּחֲזָרָה לְאוֹתָהּ כְּתוֹבֶת מֵייל שֶׁמִּמֶּנָּה נִשְׁלְחָה הַהַקְלָטָה, ' +
-        'שִׁימּוּש זֶה מִתְאַפְשֵׁר רַק מִכְּתוֹבֶת מֵייל הָרְשׁוּמָה וּמְעוּדְכֶּנֶת בַּמַּעֲרֶכֶת, וּבְתְנַאי שֶׁיֵּשׁ יִתְרָה בָּאַרְנַק';
+    const explainMsg =
+        'ניתן לשלוח הקלטה לתמלול גם באמצעות מייל, ' +
+        'בלי להתקשר למערכת, שולחים מייל עם קובץ ההקלטה מצורף לכתובת המייל של המערכת, ' +
+        'ובשורת הנושא של המייל כותבים את מספר הטלפון שלך, ' +
+        `כלומר ${phoneSpoken}, ` +
+        'אפשר גם לציין בשורת הנושא אחרי המספר את סוג התמלול ואת שפת ההקלטה ושפת הפלט הרצויה, ' +
+        'התמלול יישלח בחזרה לאותה כתובת מייל שממנה נשלחה ההקלטה, ' +
+        'שימוש זה מתאפשר רק מכתובת מייל הרשומה ומעודכנת במערכת, ובתנאי שיש יתרה בארנק';
 
     if (hasEmail) {
-        await call.id_list_message([
-            { type: 'text', data: explainMsg1 }
-        ], { prependToNextAction: true });
-
         const choice = await call.read([{
             type: 'text',
-            data: `${explainMsg2}, לְקַבָּלַת הוֹרָאוֹת מְפוֹרָטוֹת עִם דוּגְמָאוֹת וְקִישׁוּר יָשִׁיר לְמֵייל הֵקֵש 1, לַחֲזָרָה לְתַפְרִיט הָרָאשִׁי הֵקֵש 0`
+            data: `${explainMsg}, לקבלת הוראות מפורטות עם דוגמאות וקישור ישיר למייל הֵקֵש 1, לחזרה לתפריט הראשי הֵקֵש 0`
         }], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
 
         if (choice === '1') {
             try {
                 await axios.post(`${PYTHON_URL}/api/send-email-instructions`, { phone });
                 await call.id_list_message([
-                    { type: 'text', data: 'הַהוֹרָאוֹת הַמְּפוֹרָטוֹת נִשְׁלְחוּ לְכְתוֹבֶת הַמֵּייל שֶׁלְּךָ, שִׂיחָה טוֹבָה' },
+                    { type: 'text', data: 'ההוראות המפורטות נשלחו לכתובת המייל שלך, שיחה טובה' },
                     { type: 'go_to_folder', data: '/' }
                 ]);
             } catch (e) {
                 console.error('send-email-instructions error:', e.message);
                 await call.id_list_message([
-                    { type: 'text', data: 'אֵירְעָה שְׁגִיאָה בִּשְׁלִיחַת הַהוֹרָאוֹת, שִׂיחָה טוֹבָה' },
+                    { type: 'text', data: 'אירעה שגיאה בשליחת ההוראות, שיחה טובה' },
                     { type: 'go_to_folder', data: '/' }
                 ]);
             }
@@ -331,11 +325,7 @@ async function handleEmailInstructions(call, phone, customer) {
         await call.id_list_message([
             {
                 type: 'text',
-                data: explainMsg1
-            },
-            {
-                type: 'text',
-                data: `${explainMsg2}, כְּדֵי לְקַבֵּל הוֹרָאוֹת מְפוֹרָטוֹת בְּמֵייל, יֵשׁ לְעַדְכֵּן קוֹדֶם כְּתוֹבֶת מֵייל בְּתַפְרִיט עִדְכּוּן פְּרָטִים`
+                data: `${explainMsg}, כדי לקבל הוראות מפורטות במייל, יש לעדכן קודם כתובת מייל בתפריט עדכון פרטים`
             },
             { type: 'go_to_folder', data: '/' }
         ]);
@@ -356,7 +346,7 @@ async function handleManagerMessage(call, phone, customer) {
 
     const recPath = await call.read([{
         type: 'text',
-        data: 'הַשְׁאֵר הוֹדָעָתְךָ לַמְּנַהֵל לְאַחַר הַצְּלִיל, לְסִיּוּם הֵקֵש סוּלָמִית'
+        data: 'השאר הודעתך למנהל לאחר הצליל, לסיום הֵקֵש סולמית'
     }], 'record', {
         no_confirm_menu: true,
         save_on_hangup: true,
@@ -390,7 +380,7 @@ async function handleManagerMessage(call, phone, customer) {
     }
 
     await call.id_list_message([
-        { type: 'text', data: 'הוֹדָעָתְךָ הִתְקַבְּלָה, הַמְּנַהֵל יַחְזוֹר אֵלֶיךָ בְּהַקְדֵּם, שִׂיחָה טוֹבָה' },
+        { type: 'text', data: 'הודעתך התקבלה, המנהל יחזור אליך בהקדם, שיחה טובה' },
         { type: 'go_to_folder', data: '/' }
     ]);
 }
@@ -400,12 +390,12 @@ async function handleRecording(call, phone, customer) {
     if (customer && customer.balance <= minBalance) {
         const choice = await call.read([{
             type: 'text',
-            data: 'יִתְרָתְךָ נְמוּכָה, לְמַעֲבָר לִטְעִינַת אַרְנַק הֵקֵש 1, לְהַמְשִׁיךְ בְּלִי תַּשְׁלוּם הֵקֵש 2'
+            data: 'יתרתך נמוכה, למעבר לטעינת ארנק הֵקֵש 1, להמשך ללא תשלום הֵקֵש 2'
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (choice === '1') {
             await call.id_list_message([
-                { type: 'text', data: 'לִטְעִינַת אַרְנַק, פְּנֵה לְמְנַהֵל הַמַּעֲרֶכֶת, שִׂיחָה טוֹבָה' },
+                { type: 'text', data: 'לטעינת ארנק, פנה למנהל המערכת, שיחה טובה' },
                 { type: 'go_to_folder', data: 'hangup' }
             ]);
             return;
@@ -414,7 +404,7 @@ async function handleRecording(call, phone, customer) {
 
     const tierChoice = await call.read([{
         type: 'text',
-        data: 'לְתַמְלוּל רָגִיל הֵקֵש 1, לְתַמְלוּל מִקְצוֹעִי הֵקֵש 2'
+        data: 'לתמלול רגיל הֵקֵש 1, לתמלול מקצועי הֵקֵש 2'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     const transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
@@ -424,7 +414,7 @@ async function handleRecording(call, phone, customer) {
     if (transcriptionTier === 'premium' || transcriptionTier === 'gemini' || transcriptionTier === 'basic') {
         const langChoice = await call.read([{
             type: 'text',
-            data: 'לְתַמְלוּל בְּעִבְרִית הֵקֵש 1, בְּיִידִישׁ הֵקֵש 2, בְּאַנְגְלִית הֵקֵש 3'
+            data: 'לתמלול בעברית הֵקֵש 1, ביידיש הֵקֵש 2, באנגלית הֵקֵש 3'
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
 
         language = langChoice === '2' ? 'yi' : langChoice === '3' ? 'en' : 'he';
@@ -432,13 +422,13 @@ async function handleRecording(call, phone, customer) {
         if (language === 'yi') {
             const outChoice = await call.read([{
                 type: 'text',
-                data: 'לְקַבֵּל אֶת הַתַּמְלוּל בְּיִידִישׁ הֵקֵש 1, בְּעִבְרִית הֵקֵש 2'
+                data: 'לקבל את התמלול ביידיש הֵקֵש 1, בעברית הֵקֵש 2'
             }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
             outputLanguage = outChoice === '2' ? 'he' : 'yi';
         } else if (language === 'en') {
             const outChoice = await call.read([{
                 type: 'text',
-                data: 'לְקַבֵּל אֶת הַתַּמְלוּל בְּאַנְגְלִית הֵקֵש 1, בְּעִבְרִית הֵקֵש 2'
+                data: 'לקבל את התמלול באנגלית הֵקֵש 1, בעברית הֵקֵש 2'
             }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
             outputLanguage = outChoice === '2' ? 'he' : 'en';
         }
@@ -446,7 +436,7 @@ async function handleRecording(call, phone, customer) {
 
     const recPath = await call.read([{
         type: 'text',
-        data: 'הַשְׁאֵר אֶת הוֹדָעָתְךָ לְאַחַר הַצְּלִיל, לְסִיּוּם הֵקֵש סוּלָמִית אוֹ נַתֵּק'
+        data: 'השאר את הודעתך לאחר הצליל, לסיום הֵקֵש סולמית או נתק'
     }], 'record', {
         no_confirm_menu: true,
         save_on_hangup: true,
@@ -472,7 +462,7 @@ async function handleRecording(call, phone, customer) {
     if (!deliveredTo) {
         const deliveryChoice = await call.read([{
             type: 'text',
-            data: 'לִשְׁלִיחָה לְמֵייל הֵקֵש 1, לִשְׁלִיחָה לְפַקְס הֵקֵש 2'
+            data: 'לשליחה למייל הֵקֵש 1, לשליחה לפקס הֵקֵש 2'
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (deliveryChoice === '1') {
@@ -485,7 +475,7 @@ async function handleRecording(call, phone, customer) {
         } else {
             const fax = await call.read([{
                 type: 'text',
-                data: 'הֵקֵש אֶת מִסְפַּר הַפַּקְס שֶׁלְּךָ, וּלְאַחַר מִכֵּן הֵקֵש סוּלָמִית'
+                data: 'הֵקֵש את מספר הפקס שלך, ולאחר מכן הֵקֵש סולמית'
             }], 'tap', { max_digits: 15, terminate_keys: ['#'] });
             deliveryMethod = 'fax';
             deliveredTo = fax;
@@ -511,7 +501,7 @@ async function handleRecording(call, phone, customer) {
     }
 
     await call.id_list_message([
-        { type: 'text', data: 'הַהַקְלָטָה הִתְקַבְּלָה, הַתַּמְלוּל יִישָּׁלַח אֵלֶיךָ בְּקָרוֹב, שִׂיחָה טוֹבָה' },
+        { type: 'text', data: 'ההקלטה התקבלה, התמלול יישלח אליך בקרוב, שיחה טובה' },
         { type: 'go_to_folder', data: '/' }
     ]);
 }
@@ -519,12 +509,12 @@ async function handleRecording(call, phone, customer) {
 async function handleOptions(call, phone) {
     const choice = await call.read([{
         type: 'text',
-        data: 'לִטְעִינַת אַרְנַק הֵקֵש 1, לְעִדְכּוּן פְּרָטִים הֵקֵש 2, לַחֲזָרָה הֵקֵש 0'
+        data: 'לטעינת ארנק הֵקֵש 1, לעדכון פרטים הֵקֵש 2, לחזרה הֵקֵש 0'
     }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2] });
 
     if (choice === '1') {
         await call.id_list_message([
-            { type: 'text', data: 'לִטְעִינַת אַרְנַק, פְּנֵה לְמְנַהֵל הַמַּעֲרֶכֶת, שִׂיחָה טוֹבָה' },
+            { type: 'text', data: 'לטעינת ארנק, פנה למנהל המערכת, שיחה טובה' },
             { type: 'go_to_folder', data: 'hangup' }
         ]);
     } else if (choice === '2') {
@@ -544,13 +534,13 @@ async function handleUpdateDetails(call, phone) {
     } catch (e) {}
 
     const emailSpoken = customer && customer.email ? speakEmail(customer.email) : '';
-    const emailMsg = emailSpoken ? `הַמֵּייל שֶׁלְּךָ הוּא ${emailSpoken}` : 'לֹא מְעוּדְכֶּן מֵייל';
-    const faxMsg = customer && customer.fax ? `הַפַּקְס שֶׁלְּךָ הוּא ${customer.fax}` : 'לֹא מְעוּדְכֶּן פַּקְס';
-    const deliveryMsg = customer && customer.delivery_method === 'fax' ? 'שִׁיטַּת הַשְּׁלִיחָה הִיא פַּקְס' : 'שִׁיטַּת הַשְּׁלִיחָה הִיא מֵייל';
+    const emailMsg = emailSpoken ? `המייל שלך הוא ${emailSpoken}` : 'לא מעודכן מייל';
+    const faxMsg = customer && customer.fax ? `הפקס שלך הוא ${customer.fax}` : 'לא מעודכן פקס';
+    const deliveryMsg = customer && customer.delivery_method === 'fax' ? 'שיטת השליחה היא פקס' : 'שיטת השליחה היא מייל';
 
     const choice = await call.read([{
         type: 'text',
-        data: `${emailMsg}, ${faxMsg}, ${deliveryMsg}, לְעִדְכּוּן מֵייל הֵקֵש 1, לְעִדְכּוּן פַּקְס הֵקֵש 2, לְשִׁינּוּי שִׁיטַּת שְׁלִיחָה הֵקֵש 3, לַחֲזָרָה הֵקֵש 0`
+        data: `${emailMsg}, ${faxMsg}, ${deliveryMsg}, לעדכון מייל הֵקֵש 1, לעדכון פקס הֵקֵש 2, לשינוי שיטת שליחה הֵקֵש 3, לחזרה הֵקֵש 0`
     }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
     if (choice === '1') {
@@ -558,41 +548,41 @@ async function handleUpdateDetails(call, phone) {
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' });
         } catch (e) {}
-        await call.id_list_message([{ type: 'text', data: 'הַמֵּייל עוּדְכַּן בְּהַצְלָחָה' }], { prependToNextAction: true });
+        await call.id_list_message([{ type: 'text', data: 'המייל עודכן בהצלחה' }], { prependToNextAction: true });
         return await handleUpdateDetails(call, phone);
 
     } else if (choice === '2') {
         const fax = await call.read([{
             type: 'text',
-            data: 'הֵקֵש אֶת מִסְפַּר הַפַּקְס שֶׁלְּךָ, וּלְאַחַר מִכֵּן הֵקֵש סוּלָמִית'
+            data: 'הֵקֵש את מספר הפקס שלך, ולאחר מכן הֵקֵש סולמית'
         }], 'tap', { max_digits: 15, terminate_keys: ['#'] });
         const confirm = await call.read([{
             type: 'text',
-            data: `מִסְפַּר הַפַּקְס שֶׁהוּקְלַד הוּא ${fax}, לְאִישׁוּר הֵקֵש 1, לְתִיקּוּן הֵקֵש 2`
+            data: `מספר הפקס שהוקלד הוא ${fax}, לאישור הֵקֵש 1, לתיקון הֵקֵש 2`
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
         if (confirm === '2') return await handleUpdateDetails(call, phone);
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax, delivery_method: 'fax' });
         } catch (e) {}
-        await call.id_list_message([{ type: 'text', data: 'הַפַּקְס עוּדְכַּן בְּהַצְלָחָה' }], { prependToNextAction: true });
+        await call.id_list_message([{ type: 'text', data: 'הפקס עודכן בהצלחה' }], { prependToNextAction: true });
         return await handleUpdateDetails(call, phone);
 
     } else if (choice === '3') {
         const methodChoice = await call.read([{
             type: 'text',
-            data: 'לִשְׁלִיחָה לְמֵייל הֵקֵש 1, לִשְׁלִיחָה לְפַקְס הֵקֵש 2'
+            data: 'לשליחה למייל הֵקֵש 1, לשליחה לפקס הֵקֵש 2'
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (methodChoice === '1') {
             try {
                 await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, delivery_method: 'email' });
             } catch (e) {}
-            await call.id_list_message([{ type: 'text', data: 'שִׁיטַּת הַשְּׁלִיחָה עוּדְכְּנָה לְמֵייל' }], { prependToNextAction: true });
+            await call.id_list_message([{ type: 'text', data: 'שיטת השליחה עודכנה למייל' }], { prependToNextAction: true });
         } else {
             try {
                 await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, delivery_method: 'fax' });
             } catch (e) {}
-            await call.id_list_message([{ type: 'text', data: 'שִׁיטַּת הַשְּׁלִיחָה עוּדְכְּנָה לְפַקְס' }], { prependToNextAction: true });
+            await call.id_list_message([{ type: 'text', data: 'שיטת השליחה עודכנה לפקס' }], { prependToNextAction: true });
         }
         return await handleUpdateDetails(call, phone);
 
@@ -604,12 +594,12 @@ async function handleUpdateDetails(call, phone) {
 async function handleAdminMessages(call) {
     const msgId = await call.read([{
         type: 'text',
-        data: 'הֵקֵש אֶת מִסְפַּר הַהוֹדָעָה, וּלְסִיּוּם הֵקֵש סוּלָמִית'
+        data: 'הֵקֵש את מספר ההודעה, ולסיום הֵקֵש סולמית'
     }], 'tap', { max_digits: 10, terminate_keys: ['#'] });
 
     if (!msgId) {
         await call.id_list_message([
-            { type: 'text', data: 'לֹא הוּקַשׁ מִסְפָּר, שִׂיחָה טוֹבָה' },
+            { type: 'text', data: 'לא הוקש מספר, שיחה טובה' },
             { type: 'go_to_folder', data: 'hangup' }
         ]);
         return;
@@ -623,7 +613,7 @@ async function handleAdminMessages(call) {
         console.error('admin messages error:', e.message);
         if (!e.message.includes('hangup')) {
             await call.id_list_message([
-                { type: 'text', data: 'שְׁגִיאָה בִּטְעִינַת הַהוֹדָעָה, שִׂיחָה טוֹבָה' },
+                { type: 'text', data: 'שגיאה בטעינת ההודעה, שיחה טובה' },
                 { type: 'go_to_folder', data: '/' }
             ]);
         }
@@ -632,7 +622,7 @@ async function handleAdminMessages(call) {
 
     const again = await call.read([{
         type: 'text',
-        data: 'לִשְׁמִיעַת הוֹדָעָה נוֹסֶפֶת הֵקֵש 1, לְסִיּוּם הֵקֵש 2'
+        data: 'לשמיעת הודעה נוספת הֵקֵש 1, לסיום הֵקֵש 2'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (again === '1') {
