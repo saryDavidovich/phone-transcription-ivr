@@ -262,7 +262,7 @@ router.get('/', async (call) => {
 
     const choice = await call.read([{
         type: 'text',
-        data: `${welcomeMsg}, להתחלת הקלטה הקש 1, לתפריט אפשרויות הקש 2, להסבר על המערכת הקש 3, לשליחת הקלטה במייל הקש 5, להשארת הודעה למנהל הקש 9`
+        data: `${welcomeMsg}, להתחלת הקלטה הקֵש 1, לתפריט אפשרויות הקֵש 2, להסבר על המערכת הקֵש 3, לשליחת הקלטה במייל הקֵש 5, להשארת הודעה למנהל הקֵש 9`
     }], 'tap', { max_digits: 1, digits_allowed: allowedDigits });
 
     if (choice === '1') {
