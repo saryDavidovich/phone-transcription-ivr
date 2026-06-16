@@ -387,18 +387,43 @@ async function handleManagerMessage(call, phone, customer) {
 }
 
 async function handleRecording(call, phone, customer) {
-    const balance = customer ? (customer.balance || 0) : 0;
+    const balance = customer ? parseFloat(customer.balance || 0) : 0;
 
-    // יתרה אפסית או שלילית - חסום לחלוטין
-    if (balance <= 0) {
-        await call.id_list_message([
-            { type: 'text', data: 'מצטערים, אין יתרה בארנק שלך, לטעינת ארנק פנה למנהל המערכת, שיחה טובה' },
-            { type: 'go_to_folder', data: 'hangup' }
-        ]);
+    // משיכת מחירים מהשרת
+    let priceBasic = 0.90;
+    let pricePremium = 1.90;
+    try {
+        const settingsRes = await axios.get(`${PYTHON_URL}/api/settings`);
+        priceBasic = parseFloat(settingsRes.data.price_per_20min_basic || 0.90);
+        pricePremium = parseFloat(settingsRes.data.price_per_20min_premium || 1.90);
+    } catch (e) {
+        console.error('could not fetch settings:', e.message);
+    }
+
+    const minPrice = Math.min(priceBasic, pricePremium);
+
+    // בדיקה ראשונה: יתרה נמוכה מהמחיר הזול ביותר - חסום לחלוטין
+    if (balance < minPrice) {
+        if (balance <= 0) {
+            await call.id_list_message([
+                { type: 'text', data: 'מצטערים, אין יתרה בארנק שלך, לטעינת ארנק פנה למנהל המערכת, שיחה טובה' },
+                { type: 'go_to_folder', data: 'hangup' }
+            ]);
+        } else {
+            const balanceShekel = Math.floor(balance);
+            const balanceAgorot = Math.round((balance - balanceShekel) * 100);
+            const balanceStr = balanceAgorot > 0
+                ? `${balanceShekel} שקל ו ${balanceAgorot} אגורות`
+                : `${balanceShekel} שקל`;
+            await call.id_list_message([
+                { type: 'text', data: `מצטערים, יתרתך ${balanceStr} אינה מספיקה לתמלול, לטעינת ארנק פנה למנהל המערכת, שיחה טובה` },
+                { type: 'go_to_folder', data: 'hangup' }
+            ]);
+        }
         return;
     }
 
-    // יתרה נמוכה (מתחת ל-10 ₪) - התראה עם אפשרות להמשיך
+    // התראה על יתרה נמוכה (מתחת ל-10 ₪) - אפשר להמשיך
     if (balance < 10) {
         const balanceShekel = Math.floor(balance);
         const balanceAgorot = Math.round((balance - balanceShekel) * 100);
@@ -417,41 +442,57 @@ async function handleRecording(call, phone, customer) {
         }
     }
 
+    // בחירת סוג תמלול
     const tierChoice = await call.read([{
         type: 'text',
-        data: 'לתמלול רגיל הקש 1 לתמלול מקצועי הקש 2'
+        data: 'לתמלול רגיל הֵקֵש 1, לתמלול מקצועי הֵקֵש 2'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     const transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
 
-    // בחירת שפה — לתמלול מקצועי וגמיני
-    let language = 'he';
-    let outputLanguage = 'he'; // שפת הפלט
-   if (transcriptionTier === 'premium' || transcriptionTier === 'gemini' || transcriptionTier === 'basic') {
-        const langChoice = await call.read([{
-            type: 'text',
-            data: 'לתמלול בעברית הקש 1 ביידיש הקש 2 באנגלית הקש 3'
-        }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
-        language = langChoice === '2' ? 'yi' : langChoice === '3' ? 'en' : 'he';
-
-        // שפת פלט — רק אם בחר יידיש או אנגלית
-        if (language === 'yi') {
-            const outChoice = await call.read([{
-                type: 'text',
-                data: 'לקבל את התמלול ביידיש הקש 1 בעברית הקש 2'
-            }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
-            outputLanguage = outChoice === '2' ? 'he' : 'yi';
-        } else if (language === 'en') {
-            const outChoice = await call.read([{
-                type: 'text',
-                data: 'לקבל את התמלול באנגלית הקש 1 בעברית הקש 2'
-            }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
-            outputLanguage = outChoice === '2' ? 'he' : 'en';
-        }
+    // בדיקה שניה: יתרה מספיקה לסוג התמלול שנבחר
+    const requiredPrice = transcriptionTier === 'premium' ? pricePremium : priceBasic;
+    if (balance < requiredPrice) {
+        const balanceShekel = Math.floor(balance);
+        const balanceAgorot = Math.round((balance - balanceShekel) * 100);
+        const balanceStr = balanceAgorot > 0
+            ? `${balanceShekel} שקל ו ${balanceAgorot} אגורות`
+            : `${balanceShekel} שקל`;
+        const tierName = transcriptionTier === 'premium' ? 'תמלול מקצועי' : 'תמלול רגיל';
+        await call.id_list_message([
+            { type: 'text', data: `יתרתך ${balanceStr} אינה מספיקה ל${tierName} העולה ${requiredPrice} שקל, לחזרה לתפריט הֵקֵש כל מקש` },
+            { type: 'go_to_folder', data: '/' }
+        ]);
+        return;
     }
+
+    // בחירת שפה
+    let language = 'he';
+    let outputLanguage = 'he';
+    const langChoice = await call.read([{
+        type: 'text',
+        data: 'לתמלול בעברית הֵקֵש 1, ביידיש הֵקֵש 2, באנגלית הֵקֵש 3'
+    }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
+
+    language = langChoice === '2' ? 'yi' : langChoice === '3' ? 'en' : 'he';
+
+    if (language === 'yi') {
+        const outChoice = await call.read([{
+            type: 'text',
+            data: 'לקבל את התמלול ביידיש הֵקֵש 1, בעברית הֵקֵש 2'
+        }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        outputLanguage = outChoice === '2' ? 'he' : 'yi';
+    } else if (language === 'en') {
+        const outChoice = await call.read([{
+            type: 'text',
+            data: 'לקבל את התמלול באנגלית הֵקֵש 1, בעברית הֵקֵש 2'
+        }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        outputLanguage = outChoice === '2' ? 'he' : 'en';
+    }
+
     const recPath = await call.read([{
         type: 'text',
-        data: 'השאר את הודעתך לאחר הצליל לסיום הקש סולמית או נתק'
+        data: 'השאר את הודעתך לאחר הצליל, לסיום הֵקֵש סולמית או נתק'
     }], 'record', {
         no_confirm_menu: true,
         save_on_hangup: true,
@@ -477,7 +518,7 @@ async function handleRecording(call, phone, customer) {
     if (!deliveredTo) {
         const deliveryChoice = await call.read([{
             type: 'text',
-            data: 'לשליחה למייל הקש 1 לשליחה לפקס הקש 2'
+            data: 'לשליחה למייל הֵקֵש 1, לשליחה לפקס הֵקֵש 2'
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (deliveryChoice === '1') {
@@ -490,7 +531,7 @@ async function handleRecording(call, phone, customer) {
         } else {
             const fax = await call.read([{
                 type: 'text',
-                data: 'הקש את מספר הפקס שלך ולאחר מכן הקש סולמית'
+                data: 'הֵקֵש את מספר הפקס שלך, ולאחר מכן הֵקֵש סולמית'
             }], 'tap', { max_digits: 15, terminate_keys: ['#'] });
             deliveryMethod = 'fax';
             deliveredTo = fax;
