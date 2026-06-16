@@ -89,7 +89,7 @@ function speakDigits(value) {
 async function getEmailByKeypad(call) {
     const helpChoice = await call.read([{
         type: 'text',
-        data: 'להוראות כתיבה הֵקֵש 1, להתחיל להקליד הֵקֵש 2'
+        data: 'להוראות כתיבה הקֵש 1, להתחיל להקליד הקֵש 2'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (helpChoice === '1') {
@@ -101,7 +101,7 @@ async function getEmailByKeypad(call) {
 
     const input = await call.read([{
         type: 'text',
-        data: 'הקלד את כתובת המייל עד השטרודל, ולסיום הֵקֵש סולמית'
+        data: 'הקלד את כתובת המייל עד השטרודל, ולסיום הקֵש סולמית'
     }], 'tap', { max_digits: 100, sec_wait: 7, terminate_keys: ['#'] });
 
     const localPart = decodeEmail(input);
@@ -111,7 +111,7 @@ async function getEmailByKeypad(call) {
 async function getEmailByVoice(call) {
     const recPath = await call.read([{
         type: 'text',
-        data: 'הקלט את שם המייל שלך עד השטרודל, לאחר הצליל, ולסיום הֵקֵש סולמית, שים לב ייתכן והזיהוי לא יהיה מדויק'
+        data: 'הקלט את שם המייל שלך עד השטרודל, לאחר הצליל, ולסיום הקֵש סולמית, שים לב ייתכן והזיהוי לא יהיה מדויק'
     }], 'record', {
         no_confirm_menu: true,
         save_on_hangup: false,
@@ -144,7 +144,7 @@ async function getEmailByVoice(call) {
 async function getDomainByVoice(call) {
     const recPath = await call.read([{
         type: 'text',
-        data: 'הקלט את סיומת המייל לאחר הצליל, ולסיום הֵקֵש סולמית, לדוגמה הקלט יאהו נקודה קום'
+        data: 'הקלט את סיומת המייל לאחר הצליל, ולסיום הקֵש סולמית, לדוגמה הקלט יאהו נקודה קום'
     }], 'record', {
         no_confirm_menu: true,
         save_on_hangup: false,
@@ -168,7 +168,7 @@ async function getDomainByVoice(call) {
         const domainSpoken = speakEmail('@' + domain).replace('שטרודל ', '');
         const confirm = await call.read([{
             type: 'text',
-            data: `הסיומת שזוהתה היא ${domainSpoken}, לאישור הֵקֵש 1, לניסיון מחדש הֵקֵש 2`
+            data: `הסיומת שזוהתה היא ${domainSpoken}, לאישור הקֵש 1, לניסיון מחדש הקֵש 2`
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (confirm === '1') return domain;
@@ -183,7 +183,7 @@ async function getDomainByVoice(call) {
 async function getDomainAndConfirmEmail(call, localPart, mode) {
     const domainChoice = await call.read([{
         type: 'text',
-        data: 'לסיומת גימייל נקודה קום הֵקֵש 1, לסיומת יאהו נקודה קום הֵקֵש 2, לסיומת וואלה נקודה קום הֵקֵש 3, לסיומת הוטמייל נקודה קום הֵקֵש 4, לסיומת אחרת הֵקֵש 5'
+        data: 'לסיומת גימייל נקודה קום הקֵש 1, לסיומת יאהו נקודה קום הקֵש 2, לסיומת וואלה נקודה קום הקֵש 3, לסיומת הוטמייל נקודה קום הקֵש 4, לסיומת אחרת הקֵש 5'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3, 4, 5] });
 
     const domains = { '1': 'gmail.com', '2': 'yahoo.com', '3': 'walla.com', '4': 'hotmail.com' };
@@ -195,7 +195,7 @@ async function getDomainAndConfirmEmail(call, localPart, mode) {
         } else {
             const domainPart = await call.read([{
                 type: 'text',
-                data: 'הקלד את הסיומת, ולסיום הֵקֵש סולמית'
+                data: 'הקלד את הסיומת, ולסיום הקֵש סולמית'
             }], 'tap', { max_digits: 50, terminate_keys: ['#'] });
             domain = decodeEmail(domainPart);
         }
@@ -208,7 +208,7 @@ async function getDomainAndConfirmEmail(call, localPart, mode) {
 
     const confirm = await call.read([{
         type: 'text',
-        data: `המייל שהתקבל הוא ${emailSpoken}, לאישור הֵקֵש 1, לתיקון הֵקֵש 2`
+        data: `המייל שהתקבל הוא ${emailSpoken}, לאישור הקֵש 1, לתיקון הקֵש 2`
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (confirm === '1') return email;
@@ -219,7 +219,7 @@ async function getDomainAndConfirmEmail(call, localPart, mode) {
 async function getEmail(call) {
     const modeChoice = await call.read([{
         type: 'text',
-        data: 'למצב הקלטה הֵקֵש 1, למצב כתיבה הֵקֵש 2'
+        data: 'למצב הקלטה הקֵש 1, למצב כתיבה הקֵש 2'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (modeChoice === '1') {
@@ -262,7 +262,7 @@ router.get('/', async (call) => {
 
     const choice = await call.read([{
         type: 'text',
-        data: `${welcomeMsg}, להתחלת הקלטה הֵקֵש 1, לתפריט אפשרויות הֵקֵש 2, להסבר על המערכת הֵקֵש 3, לשליחת הקלטה במייל הֵקֵש 5, להשארת הודעה למנהל הֵקֵש 9`
+        data: `${welcomeMsg}, להתחלת הקלטה הקֵש 1, לתפריט אפשרויות הקֵש 2, להסבר על המערכת הקֵש 3, לשליחת הקלטה במייל הקֵש 5, להשארת הודעה למנהל הקֵש 9`
     }], 'tap', { max_digits: 1, digits_allowed: allowedDigits });
 
     if (choice === '1') {
@@ -299,7 +299,7 @@ async function handleEmailInstructions(call, phone, customer) {
     if (hasEmail) {
         const choice = await call.read([{
             type: 'text',
-            data: `${explainMsg}, לקבלת הוראות מפורטות עם דוגמאות וקישור ישיר למייל הֵקֵש 1, לחזרה לתפריט הראשי הֵקֵש 0`
+            data: `${explainMsg}, לקבלת הוראות מפורטות עם דוגמאות וקישור ישיר למייל הקֵש 1, לחזרה לתפריט הראשי הקֵש 0`
         }], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
 
         if (choice === '1') {
@@ -346,7 +346,7 @@ async function handleManagerMessage(call, phone, customer) {
 
     const recPath = await call.read([{
         type: 'text',
-        data: 'השאר הודעתך למנהל לאחר הצליל, לסיום הֵקֵש סולמית'
+        data: 'השאר הודעתך למנהל לאחר הצליל, לסיום הקֵש סולמית'
     }], 'record', {
         no_confirm_menu: true,
         save_on_hangup: true,
@@ -390,7 +390,7 @@ async function handleRecording(call, phone, customer) {
     if (customer && customer.balance <= minBalance) {
         const choice = await call.read([{
             type: 'text',
-            data: 'יתרתך נמוכה, למעבר לטעינת ארנק הֵקֵש 1, להמשך ללא תשלום הֵקֵש 2'
+            data: 'יתרתך נמוכה, למעבר לטעינת ארנק הקֵש 1, להמשך ללא תשלום הקֵש 2'
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (choice === '1') {
@@ -404,7 +404,7 @@ async function handleRecording(call, phone, customer) {
 
     const tierChoice = await call.read([{
         type: 'text',
-        data: 'לתמלול רגיל הֵקֵש 1, לתמלול מקצועי הֵקֵש 2'
+        data: 'לתמלול רגיל הקֵש 1, לתמלול מקצועי הקֵש 2'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     const transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
@@ -414,7 +414,7 @@ async function handleRecording(call, phone, customer) {
     if (transcriptionTier === 'premium' || transcriptionTier === 'gemini' || transcriptionTier === 'basic') {
         const langChoice = await call.read([{
             type: 'text',
-            data: 'לתמלול בעברית הֵקֵש 1, ביידיש הֵקֵש 2, באנגלית הֵקֵש 3'
+            data: 'לתמלול בעברית הקֵש 1, ביידיש הקֵש 2, באנגלית הקֵש 3'
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
 
         language = langChoice === '2' ? 'yi' : langChoice === '3' ? 'en' : 'he';
@@ -422,13 +422,13 @@ async function handleRecording(call, phone, customer) {
         if (language === 'yi') {
             const outChoice = await call.read([{
                 type: 'text',
-                data: 'לקבל את התמלול ביידיש הֵקֵש 1, בעברית הֵקֵש 2'
+                data: 'לקבל את התמלול ביידיש הקֵש 1, בעברית הקֵש 2'
             }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
             outputLanguage = outChoice === '2' ? 'he' : 'yi';
         } else if (language === 'en') {
             const outChoice = await call.read([{
                 type: 'text',
-                data: 'לקבל את התמלול באנגלית הֵקֵש 1, בעברית הֵקֵש 2'
+                data: 'לקבל את התמלול באנגלית הקֵש 1, בעברית הקֵש 2'
             }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
             outputLanguage = outChoice === '2' ? 'he' : 'en';
         }
@@ -436,7 +436,7 @@ async function handleRecording(call, phone, customer) {
 
     const recPath = await call.read([{
         type: 'text',
-        data: 'השאר את הודעתך לאחר הצליל, לסיום הֵקֵש סולמית או נתק'
+        data: 'השאר את הודעתך לאחר הצליל, לסיום הקֵש סולמית או נתק'
     }], 'record', {
         no_confirm_menu: true,
         save_on_hangup: true,
@@ -462,7 +462,7 @@ async function handleRecording(call, phone, customer) {
     if (!deliveredTo) {
         const deliveryChoice = await call.read([{
             type: 'text',
-            data: 'לשליחה למייל הֵקֵש 1, לשליחה לפקס הֵקֵש 2'
+            data: 'לשליחה למייל הקֵש 1, לשליחה לפקס הקֵש 2'
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (deliveryChoice === '1') {
@@ -475,7 +475,7 @@ async function handleRecording(call, phone, customer) {
         } else {
             const fax = await call.read([{
                 type: 'text',
-                data: 'הֵקֵש את מספר הפקס שלך, ולאחר מכן הֵקֵש סולמית'
+                data: 'הקֵש את מספר הפקס שלך, ולאחר מכן הקֵש סולמית'
             }], 'tap', { max_digits: 15, terminate_keys: ['#'] });
             deliveryMethod = 'fax';
             deliveredTo = fax;
@@ -509,7 +509,7 @@ async function handleRecording(call, phone, customer) {
 async function handleOptions(call, phone) {
     const choice = await call.read([{
         type: 'text',
-        data: 'לטעינת ארנק הֵקֵש 1, לעדכון פרטים הֵקֵש 2, לחזרה הֵקֵש 0'
+        data: 'לטעינת ארנק הקֵש 1, לעדכון פרטים הקֵש 2, לחזרה הקֵש 0'
     }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2] });
 
     if (choice === '1') {
@@ -540,7 +540,7 @@ async function handleUpdateDetails(call, phone) {
 
     const choice = await call.read([{
         type: 'text',
-        data: `${emailMsg}, ${faxMsg}, ${deliveryMsg}, לעדכון מייל הֵקֵש 1, לעדכון פקס הֵקֵש 2, לשינוי שיטת שליחה הֵקֵש 3, לחזרה הֵקֵש 0`
+        data: `${emailMsg}, ${faxMsg}, ${deliveryMsg}, לעדכון מייל הקֵש 1, לעדכון פקס הקֵש 2, לשינוי שיטת שליחה הקֵש 3, לחזרה הקֵש 0`
     }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
     if (choice === '1') {
@@ -554,11 +554,11 @@ async function handleUpdateDetails(call, phone) {
     } else if (choice === '2') {
         const fax = await call.read([{
             type: 'text',
-            data: 'הֵקֵש את מספר הפקס שלך, ולאחר מכן הֵקֵש סולמית'
+            data: 'הקֵש את מספר הפקס שלך, ולאחר מכן הקֵש סולמית'
         }], 'tap', { max_digits: 15, terminate_keys: ['#'] });
         const confirm = await call.read([{
             type: 'text',
-            data: `מספר הפקס שהוקלד הוא ${fax}, לאישור הֵקֵש 1, לתיקון הֵקֵש 2`
+            data: `מספר הפקס שהוקלד הוא ${fax}, לאישור הקֵש 1, לתיקון הקֵש 2`
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
         if (confirm === '2') return await handleUpdateDetails(call, phone);
         try {
@@ -570,7 +570,7 @@ async function handleUpdateDetails(call, phone) {
     } else if (choice === '3') {
         const methodChoice = await call.read([{
             type: 'text',
-            data: 'לשליחה למייל הֵקֵש 1, לשליחה לפקס הֵקֵש 2'
+            data: 'לשליחה למייל הקֵש 1, לשליחה לפקס הקֵש 2'
         }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (methodChoice === '1') {
@@ -594,7 +594,7 @@ async function handleUpdateDetails(call, phone) {
 async function handleAdminMessages(call) {
     const msgId = await call.read([{
         type: 'text',
-        data: 'הֵקֵש את מספר ההודעה, ולסיום הֵקֵש סולמית'
+        data: 'הקֵש את מספר ההודעה, ולסיום הקֵש סולמית'
     }], 'tap', { max_digits: 10, terminate_keys: ['#'] });
 
     if (!msgId) {
@@ -622,7 +622,7 @@ async function handleAdminMessages(call) {
 
     const again = await call.read([{
         type: 'text',
-        data: 'לשמיעת הודעה נוספת הֵקֵש 1, לסיום הֵקֵש 2'
+        data: 'לשמיעת הודעה נוספת הקֵש 1, לסיום הקֵש 2'
     }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (again === '1') {
