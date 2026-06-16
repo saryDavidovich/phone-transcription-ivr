@@ -233,7 +233,7 @@ router.get('/', async (call) => {
     const phone = call.ApiPhone;
 
     let customer = null;
-    let welcomeMsg = 'שלום וברוכים הבאים למערכת התמלול';
+    let welcomeMsg = 'שלום וברוכים הבאים לתמלול פון';
     try {
         const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
         customer = res.data;
