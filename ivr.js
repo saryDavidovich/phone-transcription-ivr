@@ -605,7 +605,7 @@ async function handleTopUp(call, phone) {
 
     const amount = parseInt(amountStr || '0', 10);
 
-    if (!amount || amount < 20) {
+    if (!amount || amount < 0) {
         await call.id_list_message([
             { type: 'text', data: `הסכום שהוקש ${amount || 0} שקל אינו תקין, סכום מינימום לטעינה הוא 20 שקל, חוזרים לתפריט` },
             { type: 'go_to_folder', data: '/' }
