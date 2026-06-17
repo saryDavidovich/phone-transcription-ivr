@@ -406,8 +406,8 @@ async function handleRecording(call, phone, customer) {
     if (balance < minPrice) {
         if (balance <= 0) {
             await call.id_list_message([
-                { type: 'text', data: 'מצטערים, אין יתרה בארנק שלך, לטעינת ארנק פנה למנהל המערכת, שיחה טובה' },
-                { type: 'go_to_folder', data: 'hangup' }
+                { type: 'text', data: 'מצטערים, אין יתרה בארנק שלך, לטעינת ארנק חזור לתפריט הראשי והֵקֵש 2, שיחה טובה' },
+                { type: 'go_to_folder', data: '/' }
             ]);
         } else {
             const balanceShekel = Math.floor(balance);
@@ -416,8 +416,8 @@ async function handleRecording(call, phone, customer) {
                 ? `${balanceShekel} שקל ו ${balanceAgorot} אגורות`
                 : `${balanceShekel} שקל`;
             await call.id_list_message([
-                { type: 'text', data: `מצטערים, יתרתך ${balanceStr} אינה מספיקה לתמלול, לטעינת ארנק פנה למנהל המערכת, שיחה טובה` },
-                { type: 'go_to_folder', data: 'hangup' }
+                { type: 'text', data: `מצטערים, יתרתך ${balanceStr} אינה מספיקה לתמלול, לטעינת ארנק חזור לתפריט הראשי והֵקֵש 2, שיחה טובה` },
+                { type: 'go_to_folder', data: '/' }
             ]);
         }
         return;
@@ -565,14 +565,11 @@ async function handleRecording(call, phone, customer) {
 async function handleOptions(call, phone) {
     const choice = await call.read([{
         type: 'text',
-        data: 'לטעינת ארנק הקש 1 לעדכון פרטים הקש 2 לחזרה הקש 0'
+        data: 'לטעינת ארנק הֵקֵש 1, לעדכון פרטים הֵקֵש 2, לחזרה הֵקֵש 0'
     }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2] });
 
     if (choice === '1') {
-        await call.id_list_message([
-            { type: 'text', data: 'לטעינת ארנק פנה למנהל המערכת שיחה טובה' },
-            { type: 'go_to_folder', data: 'hangup' }
-        ]);
+        await handleTopUp(call, phone);
     } else if (choice === '2') {
         await handleUpdateDetails(call, phone);
     } else {
@@ -580,6 +577,61 @@ async function handleOptions(call, phone) {
             { type: 'go_to_folder', data: '/' }
         ]);
     }
+}
+
+async function handleTopUp(call, phone) {
+    // משיכת הגדרות בונוס מהשרת
+    let bonusMsg = '';
+    try {
+        const settingsRes = await axios.get(`${PYTHON_URL}/api/settings`);
+        const s = settingsRes.data;
+        for (let i = 1; i <= 3; i++) {
+            const threshold = parseFloat(s[`bonus_threshold_${i}`] || 0);
+            const bonus = parseFloat(s[`bonus_amount_${i}`] || 0);
+            if (threshold > 0 && bonus > 0) {
+                bonusMsg = `, שים לב, מבצע מיוחד, טעינה מ ${threshold} שקל, מקנה בונוס של ${bonus} שקל נוספים`;
+                break;
+            }
+        }
+    } catch (e) {
+        console.error('could not fetch settings for topup:', e.message);
+    }
+
+    // בקשת סכום מהלקוח
+    const amountStr = await call.read([{
+        type: 'text',
+        data: `הכנס את הסכום לטעינה במספרים, מינימום 20 שקל${bonusMsg}, ולאישור הֵקֵש סולמית`
+    }], 'tap', { max_digits: 5, terminate_keys: ['#'] });
+
+    const amount = parseInt(amountStr || '0', 10);
+
+    if (!amount || amount < 20) {
+        await call.id_list_message([
+            { type: 'text', data: `הסכום שהוקש ${amount || 0} שקל אינו תקין, סכום מינימום לטעינה הוא 20 שקל, חוזרים לתפריט` },
+            { type: 'go_to_folder', data: '/' }
+        ]);
+        return;
+    }
+
+    // אישור סכום
+    const confirm = await call.read([{
+        type: 'text',
+        data: `הסכום לטעינה הוא ${amount} שקל, לאישור ומעבר לסליקה הֵקֵש 1, לביטול הֵקֵש 0`
+    }], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
+
+    if (confirm !== '1') {
+        await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
+        return;
+    }
+
+    // מעבר לשלוחת הסליקה של ימות
+    await call.id_list_message([
+        { type: 'text', data: 'עוברים לסליקה, תכף תתבקש להכניס את פרטי כרטיס האשראי שלך' },
+        {
+            type: 'go_to_folder',
+            data: `payment?billing_sum=${amount}&Description=${phone}&credit_card_tashloumim=no`
+        }
+    ]);
 }
 
 async function handleUpdateDetails(call, phone) {
