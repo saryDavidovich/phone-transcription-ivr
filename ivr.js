@@ -605,7 +605,7 @@ async function handleTopUp(call, phone) {
 
     const amount = parseInt(amountStr || '0', 10);
 
-    if (!amount || amount < 1) {
+    if (!amount || amount < 20) {
         await call.id_list_message([
             { type: 'text', data: `הסכום שהוקש ${amount || 0} שקל אינו תקין, סכום מינימום לטעינה הוא 20 שקל, חוזרים לתפריט` },
             { type: 'go_to_folder', data: '/' }
@@ -627,10 +627,7 @@ async function handleTopUp(call, phone) {
     // מעבר לשלוחת הסליקה של ימות
     await call.id_list_message([
         { type: 'text', data: 'עוברים לסליקה, תכף תתבקש להכניס את פרטי כרטיס האשראי שלך' },
-        {
-            type: 'go_to_folder',
-            data: `payment?billing_sum=${amount}&Description=${phone}&credit_card_tashloumim=no`
-        }
+        { type: 'go_to_folder', data: `payment#billing_sum=${amount}#Description=${phone}` }
     ]);
 }
 
