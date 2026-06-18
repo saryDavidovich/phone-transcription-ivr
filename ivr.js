@@ -600,12 +600,12 @@ async function handleTopUp(call, phone) {
     // בקשת סכום מהלקוח
     const amountStr = await call.read([{
         type: 'text',
-        data: `הכנס את הסכום לטעינה במספרים, מינימום 20 שקל${bonusMsg}, ולאישור הֵקֵש סולמית`
+        data: `הכנס את הסכום לטעינה במספרים, ${bonusMsg}, ולאישור הֵקֵש סולמית`
     }], 'tap', { max_digits: 5, terminate_keys: ['#'] });
 
     const amount = parseInt(amountStr || '0', 10);
 
-    if (!amount || amount < 20) {
+    if (!amount || amount < 1) {
         await call.id_list_message([
             { type: 'text', data: `הסכום שהוקש ${amount || 0} שקל אינו תקין, סכום מינימום לטעינה הוא 20 שקל, חוזרים לתפריט` },
             { type: 'go_to_folder', data: '/' }
@@ -627,7 +627,7 @@ async function handleTopUp(call, phone) {
     // מעבר לשלוחת הסליקה של ימות
     await call.id_list_message([
         { type: 'text', data: 'עוברים לסליקה, תכף תתבקש להכניס את פרטי כרטיס האשראי שלך' },
-        { type: 'go_to_folder', data: `payment#billing_sum=${amount}#Description=${phone}` }
+        { type: 'go_to_folder', data: `199#billing_sum=${amount}#Description=${phone}` }
     ]);
 }
 
