@@ -589,7 +589,7 @@ async function handleTopUp(call, phone) {
             const threshold = parseFloat(s[`bonus_threshold_${i}`] || 0);
             const bonus = parseFloat(s[`bonus_amount_${i}`] || 0);
             if (threshold > 0 && bonus > 0) {
-                bonusMsg = `, שים לב, מבצע מיוחד, טעינה מ ${threshold} שקל, מקנה בונוס של ${bonus} שקל נוספים`;
+                bonusMsg = `שים לב, מבצע מיוחד, טעינה מ ${threshold} שקל, מקנה בונוס של ${bonus} שקל נוספים, `;
                 break;
             }
         }
@@ -597,48 +597,9 @@ async function handleTopUp(call, phone) {
         console.error('could not fetch settings for topup:', e.message);
     }
 
-    // בקשת סכום מהלקוח
-    const amountStr = await call.read([{
-        type: 'text',
-        data: `הכנס את הסכום לטעינה במספרים, מינימום 20 שקל${bonusMsg}, ולאישור הֵקֵש סולמית`
-    }], 'tap', { max_digits: 5, terminate_keys: ['#'] });
-
-    const amount = parseInt(amountStr || '0', 10);
-
-    if (!amount || amount < 20) {
-        await call.id_list_message([
-            { type: 'text', data: `הסכום שהוקש ${amount || 0} שקל אינו תקין, סכום מינימום לטעינה הוא 20 שקל, חוזרים לתפריט` },
-            { type: 'go_to_folder', data: '/' }
-        ]);
-        return;
-    }
-
-    // אישור סכום
-    const confirm = await call.read([{
-        type: 'text',
-        data: `הסכום לטעינה הוא ${amount} שקל, לאישור ומעבר לסליקה הֵקֵש 1, לביטול הֵקֵש 0`
-    }], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
-
-    if (confirm !== '1') {
-        await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
-        return;
-    }
-
-    // שמירת הסכום ב-session לפני מעבר לסליקה
-    // ימות מקבלים את billing_sum מהגדרות השלוחה עצמה
-    // אנחנו נשמור את הסכום ב-DB כ-pending לפני המעבר
-    try {
-        await axios.post(`${PYTHON_URL}/api/payment/pending`, {
-            phone,
-            amount
-        });
-    } catch (e) {
-        console.error('could not save pending payment:', e.message);
-    }
-
-    // מעבר לשלוחת הסליקה של ימות - רק מספר השלוחה
+    // מעבר ישיר לשלוחת הסליקה - ימות מנהלים את שאלת הסכום והגבלות
     await call.id_list_message([
-        { type: 'text', data: 'עוברים לסליקה, תכף תתבקש להכניס את פרטי כרטיס האשראי שלך' },
+        { type: 'text', data: `${bonusMsg}תכף תתבקש להכניס את פרטי כרטיס האשראי שלך` },
         { type: 'go_to_folder', data: '199' }
     ]);
 }
