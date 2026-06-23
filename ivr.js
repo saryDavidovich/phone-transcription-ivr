@@ -8,7 +8,7 @@ const PYTHON_URL = process.env.PYTHON_URL || 'https://web-production-90272.up.ra
 const router = YemotRouter({ printLog: true });
 
 // נתיב תיקיית הודעות מערכת בימות
-const MSG = (n) => ({ type: 'file', data: `/הודעות מערכת/${String(n).padStart(3,'0')}/000.wav` });
+const MSG = (n) => ({ type: 'file', data: `/הודעות מערכת/${String(n).padStart(3,'0')}/000` });
 
 const KEY_MAP = {
     '1': ['.', '1'],
