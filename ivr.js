@@ -7,6 +7,9 @@ const PYTHON_URL = process.env.PYTHON_URL || 'https://web-production-90272.up.ra
 
 const router = YemotRouter({ printLog: true });
 
+// נתיב תיקיית הודעות מערכת בימות
+const MSG = (n) => ({ type: 'file', data: `/הודעות מערכת/${String(n).padStart(3,'0')}.wav` });
+
 const KEY_MAP = {
     '1': ['.', '1'],
     '2': ['a', 'b', 'c', '2'],
@@ -87,32 +90,24 @@ function speakDigits(value) {
 }
 
 async function getEmailByKeypad(call) {
-    const helpChoice = await call.read([{
-        type: 'text',
-        data: 'להוראות כתיבה הקש 1 להתחיל להקליד הקש 2'
-    }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    // 045 - להוראות כתיבה הקש 1, להתחיל להקליד הקש 2
+    const helpChoice = await call.read([MSG(45)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (helpChoice === '1') {
-        await call.id_list_message([{
-            type: 'text',
-            data: 'יש להקליד לפי מקשי הטלפון לאות A הקישו 2 פעם אחת לאות B הקישו 2 פעמיים לאות C הקישו 2 שלוש פעמים לספרה 2 הקישו 2 ארבע פעמים לאות D הקישו 3 פעם אחת לאות E הקישו 3 פעמיים לאות F הקישו 3 שלוש פעמים לספרה 3 הקישו 3 ארבע פעמים לנקודה הקישו 1 פעם אחת לספרה 1 הקישו 1 פעמיים לספרה 0 הקישו 0 פעם אחת'
-        }], { prependToNextAction: true });
+        // 046 - הוראות הקלדה מלאות לפי מקשי טלפון
+        await call.id_list_message([MSG(46)], { prependToNextAction: true });
     }
 
-    const input = await call.read([{
-        type: 'text',
-        data: 'הקלד את כתובת המייל עד השטרודל ולסיום הקש סולמית'
-    }], 'tap', { max_digits: 100, sec_wait: 7, terminate_keys: ['#'] });
+    // 047 - הקלד את כתובת המייל עד השטרודל, ולסיום הקש סולמית
+    const input = await call.read([MSG(47)], 'tap', { max_digits: 100, sec_wait: 7, terminate_keys: ['#'] });
 
     const localPart = decodeEmail(input);
     return await getDomainAndConfirmEmail(call, localPart, 'כתיבה');
 }
 
 async function getEmailByVoice(call) {
-    const recPath = await call.read([{
-        type: 'text',
-        data: 'הקליט את שם המייל שלך עד השטרודל לאחר הצליל ולסיום הקש סולמית שים לב ייתכן והזיהוי לא יהיה מדויק'
-    }], 'record', {
+    // 048 - הקליט את שם המייל שלך עד השטרודל לאחר הצליל, ולסיום הקש סולמית, שים לב ייתכן והזיהוי לא יהיה מדויק
+    const recPath = await call.read([MSG(48)], 'record', {
         no_confirm_menu: true,
         save_on_hangup: false,
         path: '/tmp_emails'
@@ -128,7 +123,8 @@ async function getEmailByVoice(call) {
         const localPart = res.data.local_part || '';
 
         if (!localPart) {
-            await call.id_list_message([{ type: 'text', data: 'לא הצלחנו לזהות את שם המייל נסו שוב' }], { prependToNextAction: true });
+            // 049 - לא הצלחנו לזהות את שם המייל, נסו שוב
+            await call.id_list_message([MSG(49)], { prependToNextAction: true });
             return await getEmailByVoice(call);
         }
 
@@ -136,16 +132,15 @@ async function getEmailByVoice(call) {
 
     } catch (e) {
         console.error('extract email error:', e.message);
-        await call.id_list_message([{ type: 'text', data: 'אירעה שגיאה עוברים למצב כתיבה' }], { prependToNextAction: true });
+        // 050 - אירעה שגיאה, עוברים למצב כתיבה
+        await call.id_list_message([MSG(50)], { prependToNextAction: true });
         return await getEmailByKeypad(call);
     }
 }
 
 async function getDomainByVoice(call) {
-    const recPath = await call.read([{
-        type: 'text',
-        data: 'הקליט את סיומת המייל לאחר הצליל ולסיום הקש סולמית לדוגמה הקליט יאהו נקודה קום'
-    }], 'record', {
+    // 051 - הקליט את סיומת המייל לאחר הצליל ולסיום הקש סולמית, לדוגמה הקליט יאהו נקודה קום
+    const recPath = await call.read([MSG(51)], 'record', {
         no_confirm_menu: true,
         save_on_hangup: false,
         path: '/tmp_emails'
@@ -161,15 +156,18 @@ async function getDomainByVoice(call) {
         const domain = res.data.local_part || '';
 
         if (!domain) {
-            await call.id_list_message([{ type: 'text', data: 'לא הצלחנו לזהות את הסיומת נסו שוב' }], { prependToNextAction: true });
+            // 052 - לא הצלחנו לזהות את הסיומת, נסו שוב
+            await call.id_list_message([MSG(52)], { prependToNextAction: true });
             return await getDomainByVoice(call);
         }
 
         const domainSpoken = speakEmail('@' + domain).replace('שטרודל ', '');
-        const confirm = await call.read([{
-            type: 'text',
-            data: `הסיומת שזוהתה היא ${domainSpoken} לאישור הקש 1 לניסיון מחדש הקש 2`
-        }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        // 053 - הסיומת שזוהתה היא [דינמי] + 054 - לאישור הקש 1, לניסיון מחדש הקש 2
+        const confirm = await call.read([
+            MSG(53),
+            { type: 'text', data: domainSpoken },
+            MSG(54)
+        ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (confirm === '1') return domain;
         return await getDomainByVoice(call);
@@ -181,10 +179,8 @@ async function getDomainByVoice(call) {
 }
 
 async function getDomainAndConfirmEmail(call, localPart, mode) {
-    const domainChoice = await call.read([{
-        type: 'text',
-        data: 'לסיומת גימייל נקודה קום הקש 1 לסיומת יאהו נקודה קום הקש 2 לסיומת וואלה נקודה קום הקש 3 לסיומת הוטמייל נקודה קום הקש 4 לסיומת אחרת הקש 5'
-    }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3, 4, 5] });
+    // 055 - לסיומת ג'ימייל הקש 1... לסיומת אחרת הקש 5
+    const domainChoice = await call.read([MSG(55)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3, 4, 5] });
 
     const domains = { '1': 'gmail.com', '2': 'yahoo.com', '3': 'walla.com', '4': 'hotmail.com' };
 
@@ -193,10 +189,8 @@ async function getDomainAndConfirmEmail(call, localPart, mode) {
         if (mode === 'הקלטה') {
             domain = await getDomainByVoice(call);
         } else {
-            const domainPart = await call.read([{
-                type: 'text',
-                data: 'הקלד את הסיומת ולסיום הקש סולמית'
-            }], 'tap', { max_digits: 50, terminate_keys: ['#'] });
+            // 056 - הקלד את הסיומת ולסיום הקש סולמית
+            const domainPart = await call.read([MSG(56)], 'tap', { max_digits: 50, terminate_keys: ['#'] });
             domain = decodeEmail(domainPart);
         }
     } else {
@@ -206,10 +200,9 @@ async function getDomainAndConfirmEmail(call, localPart, mode) {
     const email = `${localPart}@${domain}`;
     const emailSpoken = speakEmail(email);
 
-    const confirm = await call.read([{
-        type: 'text',
-        data: `המייל שהתקבל הוא ${emailSpoken} לאישור הקש 1 לתיקון הקש 2`
-    }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    const confirm = await call.read([
+        { type: 'text', data: `המייל שהתקבל הוא ${emailSpoken} לאישור הקש 1 לתיקון הקש 2` }
+    ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (confirm === '1') return email;
     if (mode === 'הקלטה') return await getEmailByVoice(call);
@@ -217,10 +210,8 @@ async function getDomainAndConfirmEmail(call, localPart, mode) {
 }
 
 async function getEmail(call) {
-    const modeChoice = await call.read([{
-        type: 'text',
-        data: 'למצב הקלטה הקש 1 למצב כתיבה הקש 2'
-    }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    // 057 - למצב הקלטה הקש 1, למצב כתיבה הקש 2
+    const modeChoice = await call.read([MSG(57)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (modeChoice === '1') {
         return await getEmailByVoice(call);
@@ -233,43 +224,53 @@ router.get('/', async (call) => {
     const phone = call.ApiPhone;
 
     let customer = null;
-    let welcomeMsg = 'שלום וברוכים הבאים למערכת התמלול';
     try {
         const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
         customer = res.data;
         if (customer.is_blocked) {
             await call.id_list_message([
-                { type: 'text', data: 'מצטערים חשבונך חסום לפרטים פנה לשירות לקוחות' },
+                // 005 - מצטערים, חשבונך חסום, לפרטים פנה לשירות לקוחות
+                MSG(5),
                 { type: 'go_to_folder', data: 'hangup' }
             ]);
             return;
-        }
-        if (customer.balance > 0) {
-            const balanceShekel = Math.floor(customer.balance);
-            const balanceAgorot = Math.round((customer.balance - balanceShekel) * 100);
-            if (balanceAgorot > 0) {
-                welcomeMsg += ` יתרתך היא ${balanceShekel} שקל ו ${balanceAgorot} אגורות`;
-            } else {
-                welcomeMsg += ` יתרתך היא ${balanceShekel} שקל`;
-            }
         }
     } catch (e) {
         console.error('customer error:', e.message);
     }
 
+    const balance = customer ? parseFloat(customer.balance || 0) : 0;
+    const balanceShekel = Math.floor(balance);
+    const balanceAgorot = Math.round((balance - balanceShekel) * 100);
+
+    // בניית הקראת יתרה דינמית
+    const balanceParts = [];
+    if (balance > 0) {
+        // 003 - יתרתך היא
+        balanceParts.push(MSG(3));
+        if (balanceAgorot > 0) {
+            balanceParts.push({ type: 'text', data: `${balanceShekel} שקל ו ${balanceAgorot} אגורות` });
+        } else {
+            balanceParts.push({ type: 'text', data: `${balanceShekel} שקל` });
+        }
+    }
+
     const ADMIN_PHONE = '0527134491';
     const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 5, 6, 9] : [1, 2, 3, 5, 6, 9];
 
-    const choice = await call.read([{
-        type: 'text',
-        data: `${welcomeMsg} להתחלת הקלטה הקש 1 לתפריט אפשרויות הקש 2 להסבר על המערכת הקש 3 לשליחת הקלטה במייל הקש 5 לשליחת כתב יד לזיהוי הקש 6 להשארת הודעה למנהל הקש 9`
-    }], 'tap', { max_digits: 1, digits_allowed: allowedDigits });
+    const choice = await call.read([
+        MSG(1),   // 001 - שלום, ברוכים הבאים למערכת התמלול
+        MSG(2),   // 002 - קובץ ריק — הודעה זמנית לכניסה
+        ...balanceParts,
+        MSG(4),   // 004 - תפריט ראשי: הקש 1... הקש 9
+    ], 'tap', { max_digits: 1, digits_allowed: allowedDigits });
 
     if (choice === '1') {
         await handleRecording(call, phone, customer);
     } else if (choice === '3') {
         await call.id_list_message([
-            { type: 'text', data: 'מערכת זו מאפשרת להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס שיחה טובה' },
+            // 006 - מערכת זו מאפשרת להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס, שיחה טובה
+            MSG(6),
             { type: 'go_to_folder', data: '/' }
         ]);
     } else if (choice === '5') {
@@ -289,32 +290,28 @@ async function handleEmailInstructions(call, phone, customer) {
     const hasEmail = !!(customer && customer.email);
     const phoneSpoken = speakDigits(phone);
 
-    const explainMsg =
-        'ניתן לשלוח הקלטה לתמלול גם באמצעות מייל ' +
-        'בלי להתקשר למערכת שולחים מייל עם קובץ ההקלטה מצורף לכתובת המייל של המערכת ' +
-        'ובשורת הנושא של המייל כותבים את מספר הטלפון שלך ' +
-        `כלומר ${phoneSpoken} ` +
-        'אפשר גם לציין בשורת הנושא אחרי המספר את סוג התמלול ואת שפת ההקלטה ושפת הפלט הרצויה ' +
-        'התמלול יישלח בחזרה לאותה כתובת מייל שממנה נשלחה ההקלטה ' +
-        'שימוש זה מתאפשר רק מכתובת מייל הרשומה ומעודכנת במערכת ובתנאי שיש יתרה בארנק';
-
     if (hasEmail) {
-        const choice = await call.read([{
-            type: 'text',
-            data: `${explainMsg} לקבלת הוראות מפורטות עם דוגמאות וקישור ישיר למייל הקש 1 לחזרה לתפריט הראשי הקש 0`
-        }], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
+        const choice = await call.read([
+            // 041 - הסבר שלוחה 5 עד לפני מספר הטלפון
+            MSG(41),
+            { type: 'text', data: phoneSpoken },
+            // 042 - המשך הסבר שלוחה 5 + הקש 1 לקבלת הוראות, הקש 0 לחזרה
+            MSG(42),
+        ], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
 
         if (choice === '1') {
             try {
                 await axios.post(`${PYTHON_URL}/api/send-email-instructions`, { phone });
                 await call.id_list_message([
-                    { type: 'text', data: 'ההוראות המפורטות נשלחו לכתובת המייל שלך שיחה טובה' },
+                    // 038 - ההוראות המפורטות נשלחו לכתובת המייל שלך, שיחה טובה
+                    MSG(38),
                     { type: 'go_to_folder', data: '/' }
                 ]);
             } catch (e) {
                 console.error('send-email-instructions error:', e.message);
                 await call.id_list_message([
-                    { type: 'text', data: 'אירעה שגיאה בשליחת ההוראות שיחה טובה' },
+                    // 039 - אירעה שגיאה בשליחת ההוראות, שיחה טובה
+                    MSG(39),
                     { type: 'go_to_folder', data: '/' }
                 ]);
             }
@@ -325,10 +322,11 @@ async function handleEmailInstructions(call, phone, customer) {
 
     } else {
         await call.id_list_message([
-            {
-                type: 'text',
-                data: `${explainMsg} כדי לקבל הוראות מפורטות במייל יש לעדכן קודם כתובת מייל בתפריט עדכון פרטים באמצעות תפריט אפשרויות`
-            },
+            // 041 - הסבר שלוחה 5 עד לפני מספר הטלפון
+            MSG(41),
+            { type: 'text', data: phoneSpoken },
+            // 040 - כדי לקבל הוראות מפורטות במייל יש לעדכן קודם כתובת מייל...
+            MSG(40),
             { type: 'go_to_folder', data: '/' }
         ]);
     }
@@ -338,35 +336,28 @@ async function handleHandwritingInstructions(call, phone, customer) {
     const hasEmail = !!(customer && customer.email);
     const phoneSpoken = speakDigits(phone);
 
-    const explainMsg =
-        'שירות זיהוי כתב יד, גרסה נסיונית, ' +
-        'ניתן לשלוח תמונות או קבצי PDF של כתב יד לזיהוי וקבלת הטקסט חזרה במייל, ' +
-        'שולחים מייל עם קובץ התמונה או ה P D F מצורף לכתובת המייל של המערכת, ' +
-        'ובשורת הנושא של המייל כותבים את מספר הטלפון שלך, ' +
-        `כלומר ${phoneSpoken}, ` +
-        'שימו לב, שירות זה נמצא בגרסה נסיונית בלבד, ' +
-        'ייתכנו שגיאות, מילים משובשות, או קטעים שלא יזוהו כראוי, ' +
-        'אנו ממליצים לבדוק את התוצאה ולא להסתמך עליה באופן מלא, ' +
-        'התמלול יישלח בחזרה לאותה כתובת מייל שממנה נשלח הקובץ, ' +
-        'שימוש זה מתאפשר רק מכתובת מייל הרשומה ומעודכנת במערכת ובתנאי שיש יתרה בארנק';
-
     if (hasEmail) {
-        const choice = await call.read([{
-            type: 'text',
-            data: `${explainMsg} לקבלת הוראות מפורטות עם דוגמאות וקישור ישיר למייל הקש 1 לחזרה לתפריט הראשי הקש 0`
-        }], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
+        const choice = await call.read([
+            // 043 - הסבר שלוחה 6 עד לפני מספר הטלפון
+            MSG(43),
+            { type: 'text', data: phoneSpoken },
+            // 044 - המשך הסבר שלוחה 6 + הקש 1 לקבלת הוראות, הקש 0 לחזרה
+            MSG(44),
+        ], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
 
         if (choice === '1') {
             try {
                 await axios.post(`${PYTHON_URL}/api/send-handwriting-instructions`, { phone });
                 await call.id_list_message([
-                    { type: 'text', data: 'ההוראות המפורטות נשלחו לכתובת המייל שלך שיחה טובה' },
+                    // 038 - ההוראות המפורטות נשלחו לכתובת המייל שלך, שיחה טובה
+                    MSG(38),
                     { type: 'go_to_folder', data: '/' }
                 ]);
             } catch (e) {
                 console.error('send-handwriting-instructions error:', e.message);
                 await call.id_list_message([
-                    { type: 'text', data: 'אירעה שגיאה בשליחת ההוראות שיחה טובה' },
+                    // 039 - אירעה שגיאה בשליחת ההוראות, שיחה טובה
+                    MSG(39),
                     { type: 'go_to_folder', data: '/' }
                 ]);
             }
@@ -377,17 +368,17 @@ async function handleHandwritingInstructions(call, phone, customer) {
 
     } else {
         await call.id_list_message([
-            {
-                type: 'text',
-                data: `${explainMsg} כדי לקבל הוראות מפורטות במייל יש לעדכן קודם כתובת מייל בתפריט עדכון פרטים באמצעות תפריט אפשרויות`
-            },
+            // 043 - הסבר שלוחה 6 עד לפני מספר הטלפון
+            MSG(43),
+            { type: 'text', data: phoneSpoken },
+            // 040 - כדי לקבל הוראות מפורטות במייל יש לעדכן קודם כתובת מייל...
+            MSG(40),
             { type: 'go_to_folder', data: '/' }
         ]);
     }
 }
 
 async function handleManagerMessage(call, phone, customer) {
-    // קבל מספר ID לפני ההקלטה
     let msgId = call.ApiCallId;
     try {
         const idRes = await axios.post(`${PYTHON_URL}/api/manager-message-reserve`, {
@@ -399,10 +390,9 @@ async function handleManagerMessage(call, phone, customer) {
         console.error('reserve error:', e.message);
     }
 
-    const recPath = await call.read([{
-        type: 'text',
-        data: 'השאר הודעתך למנהל לאחר הצליל לסיום הקש סולמית'
-    }], 'record', {
+    // 009 - קובץ ריק — הודעה זמנית לפני הודעה למנהל
+    // 010 - השאר הודעתך למנהל לאחר הצליל, לסיום הקש סולמית
+    const recPath = await call.read([MSG(9), MSG(10)], 'record', {
         no_confirm_menu: true,
         save_on_hangup: true,
         path: '/manager_messages',
@@ -435,7 +425,8 @@ async function handleManagerMessage(call, phone, customer) {
     }
 
     await call.id_list_message([
-        { type: 'text', data: 'הודעתך התקבלה המנהל יחזור אליך בהקדם שיחה טובה' },
+        // 011 - הודעתך התקבלה, המנהל יחזור אליך בהקדם, שיחה טובה
+        MSG(11),
         { type: 'go_to_folder', data: '/' }
     ]);
 }
@@ -443,7 +434,6 @@ async function handleManagerMessage(call, phone, customer) {
 async function handleRecording(call, phone, customer) {
     const balance = customer ? parseFloat(customer.balance || 0) : 0;
 
-    // משיכת מחירים מהשרת
     let priceBasic = 0.90;
     let pricePremium = 1.90;
     try {
@@ -456,11 +446,11 @@ async function handleRecording(call, phone, customer) {
 
     const minPrice = Math.min(priceBasic, pricePremium);
 
-    // בדיקה ראשונה: יתרה נמוכה מהמחיר הזול ביותר - חסום לחלוטין
     if (balance < minPrice) {
         if (balance <= 0) {
             await call.id_list_message([
-                { type: 'text', data: 'מצטערים, אין יתרה בארנק שלך, לטעינת ארנק חזור לתפריט הראשי והֵקֵש 2, שיחה טובה' },
+                // 012 - מצטערים, אין יתרה בארנק שלך, לטעינת ארנק חזור לתפריט הראשי והקש 2, שיחה טובה
+                MSG(12),
                 { type: 'go_to_folder', data: '/' }
             ]);
         } else {
@@ -470,14 +460,16 @@ async function handleRecording(call, phone, customer) {
                 ? `${balanceShekel} שקל ו ${balanceAgorot} אגורות`
                 : `${balanceShekel} שקל`;
             await call.id_list_message([
-                { type: 'text', data: `מצטערים, יתרתך ${balanceStr} אינה מספיקה לתמלול, לטעינת ארנק חזור לתפריט הראשי והֵקֵש 2, שיחה טובה` },
+                // 013 - מצטערים, יתרתך [דינמי] 014 - אינה מספיקה לתמלול, לטעינת ארנק חזור לתפריט הראשי והקש 2, שיחה טובה
+                MSG(13),
+                { type: 'text', data: balanceStr },
+                MSG(14),
                 { type: 'go_to_folder', data: '/' }
             ]);
         }
         return;
     }
 
-    // התראה על יתרה נמוכה (מתחת ל-10 ₪) - אפשר להמשיך
     if (balance < 10) {
         const balanceShekel = Math.floor(balance);
         const balanceAgorot = Math.round((balance - balanceShekel) * 100);
@@ -485,10 +477,9 @@ async function handleRecording(call, phone, customer) {
             ? `${balanceShekel} שקל ו ${balanceAgorot} אגורות`
             : `${balanceShekel} שקל`;
 
-        const choice = await call.read([{
-            type: 'text',
-            data: `שים לב, יתרתך נמוכה, ${balanceStr} בלבד, להמשך הקלטה הֵקֵש 1, לחזרה לתפריט הֵקֵש 0`
-        }], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
+        const choice = await call.read([
+            { type: 'text', data: `שים לב, יתרתך נמוכה, ${balanceStr} בלבד, להמשך הקלטה הֵקֵש 1, לחזרה לתפריט הֵקֵש 0` }
+        ], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
 
         if (choice === '0') {
             await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
@@ -496,15 +487,11 @@ async function handleRecording(call, phone, customer) {
         }
     }
 
-    // בחירת סוג תמלול
-    const tierChoice = await call.read([{
-        type: 'text',
-        data: 'לתמלול רגיל הֵקֵש 1, לתמלול מקצועי הֵקֵש 2'
-    }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    // 015 - לתמלול רגיל הקש 1, לתמלול מקצועי הקש 2
+    const tierChoice = await call.read([MSG(15)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     const transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
 
-    // בדיקה שניה: יתרה מספיקה לסוג התמלול שנבחר
     const requiredPrice = transcriptionTier === 'premium' ? pricePremium : priceBasic;
     if (balance < requiredPrice) {
         const balanceShekel = Math.floor(balance);
@@ -514,40 +501,38 @@ async function handleRecording(call, phone, customer) {
             : `${balanceShekel} שקל`;
         const tierName = transcriptionTier === 'premium' ? 'תמלול מקצועי' : 'תמלול רגיל';
         await call.id_list_message([
-            { type: 'text', data: `יתרתך ${balanceStr} אינה מספיקה ל${tierName} העולה ${requiredPrice} שקל, לחזרה לתפריט הֵקֵש כל מקש` },
+            // 016 - מצטערים, יתרתך [דינמי] 017 - אינה מספיקה ל [דינמי-שם תמלול] 018 - העולה [דינמי-מחיר] 019 - שקל, לחזרה לתפריט הקש כל מקש
+            MSG(16),
+            { type: 'text', data: balanceStr },
+            MSG(17),
+            { type: 'text', data: tierName },
+            MSG(18),
+            { type: 'text', data: String(requiredPrice) },
+            MSG(19),
             { type: 'go_to_folder', data: '/' }
         ]);
         return;
     }
 
-    // בחירת שפה
+    // 020 - לתמלול בעברית הקש 1, ביידיש הקש 2, באנגלית הקש 3
     let language = 'he';
     let outputLanguage = 'he';
-    const langChoice = await call.read([{
-        type: 'text',
-        data: 'לתמלול בעברית הֵקֵש 1, ביידיש הֵקֵש 2, באנגלית הֵקֵש 3'
-    }], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
+    const langChoice = await call.read([MSG(20)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
 
     language = langChoice === '2' ? 'yi' : langChoice === '3' ? 'en' : 'he';
 
     if (language === 'yi') {
-        const outChoice = await call.read([{
-            type: 'text',
-            data: 'לקבל את התמלול ביידיש הֵקֵש 1, בעברית הֵקֵש 2'
-        }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        // 021 - לקבל את התמלול ביידיש הקש 1, בעברית הקש 2
+        const outChoice = await call.read([MSG(21)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
         outputLanguage = outChoice === '2' ? 'he' : 'yi';
     } else if (language === 'en') {
-        const outChoice = await call.read([{
-            type: 'text',
-            data: 'לקבל את התמלול באנגלית הֵקֵש 1, בעברית הֵקֵש 2'
-        }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        // 022 - לקבל את התמלול באנגלית הקש 1, בעברית הקש 2
+        const outChoice = await call.read([MSG(22)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
         outputLanguage = outChoice === '2' ? 'he' : 'en';
     }
 
-    const recPath = await call.read([{
-        type: 'text',
-        data: 'השאר את הודעתך לאחר הצליל, לסיום הֵקֵש סולמית או נתק'
-    }], 'record', {
+    // 023 - השאר את הודעתך לאחר הצליל, לסיום הקש סולמית או נתק
+    const recPath = await call.read([MSG(23)], 'record', {
         no_confirm_menu: true,
         save_on_hangup: true,
         path: '/recordings'
@@ -570,10 +555,8 @@ async function handleRecording(call, phone, customer) {
     }
 
     if (!deliveredTo) {
-        const deliveryChoice = await call.read([{
-            type: 'text',
-            data: 'לשליחה למייל הֵקֵש 1, לשליחה לפקס הֵקֵש 2'
-        }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        // 024 - לשליחה למייל הקש 1, לשליחה לפקס הקש 2
+        const deliveryChoice = await call.read([MSG(24)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (deliveryChoice === '1') {
             const email = await getEmail(call);
@@ -583,10 +566,8 @@ async function handleRecording(call, phone, customer) {
                 await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' });
             } catch (e) {}
         } else {
-            const fax = await call.read([{
-                type: 'text',
-                data: 'הֵקֵש את מספר הפקס שלך, ולאחר מכן הֵקֵש סולמית'
-            }], 'tap', { max_digits: 15, terminate_keys: ['#'] });
+            // 025 - הקש את מספר הפקס שלך, ולאחר מכן הקש סולמית
+            const fax = await call.read([MSG(25)], 'tap', { max_digits: 15, terminate_keys: ['#'] });
             deliveryMethod = 'fax';
             deliveredTo = fax;
             try {
@@ -611,31 +592,27 @@ async function handleRecording(call, phone, customer) {
     }
 
     await call.id_list_message([
-        { type: 'text', data: 'ההקלטה התקבלה התמלול ישלח אליך בקרוב שיחה טובה' },
+        // 026 - ההקלטה התקבלה, התמלול ישלח אליך בקרוב, שיחה טובה
+        MSG(26),
         { type: 'go_to_folder', data: '/' }
     ]);
 }
 
 async function handleOptions(call, phone) {
-    const choice = await call.read([{
-        type: 'text',
-        data: 'לטעינת ארנק הֵקֵש 1, לעדכון פרטים הֵקֵש 2, לחזרה הֵקֵש 0'
-    }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2] });
+    // 027 - לטעינת ארנק הקש 1, לעדכון פרטים הקש 2, לחזרה הקש 0
+    const choice = await call.read([MSG(27)], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2] });
 
     if (choice === '1') {
         await handleTopUp(call, phone);
     } else if (choice === '2') {
         await handleUpdateDetails(call, phone);
     } else {
-        await call.id_list_message([
-            { type: 'go_to_folder', data: '/' }
-        ]);
+        await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
     }
 }
 
 async function handleTopUp(call, phone) {
-    // משיכת הגדרות בונוס מהשרת
-    let bonusMsg = '';
+    let bonusMsg = [];
     try {
         const settingsRes = await axios.get(`${PYTHON_URL}/api/settings`);
         const s = settingsRes.data;
@@ -643,7 +620,7 @@ async function handleTopUp(call, phone) {
             const threshold = parseFloat(s[`bonus_threshold_${i}`] || 0);
             const bonus = parseFloat(s[`bonus_amount_${i}`] || 0);
             if (threshold > 0 && bonus > 0) {
-                bonusMsg = `שים לב, מבצע מיוחד, טעינה מ ${threshold} שקל, מקנה בונוס של ${bonus} שקל נוספים, `;
+                bonusMsg = [{ type: 'text', data: `שים לב, מבצע מיוחד, טעינה מ ${threshold} שקל, מקנה בונוס של ${bonus} שקל נוספים` }];
                 break;
             }
         }
@@ -651,9 +628,10 @@ async function handleTopUp(call, phone) {
         console.error('could not fetch settings for topup:', e.message);
     }
 
-    // מעבר ישיר לשלוחת הסליקה - ימות מנהלים את שאלת הסכום והגבלות
     await call.id_list_message([
-        { type: 'text', data: `${bonusMsg}תכף תתבקש להכניס את פרטי כרטיס האשראי שלך` },
+        ...bonusMsg,
+        MSG(7),   // 007 - קובץ ריק — הודעה זמנית לפני סליקה
+        MSG(8),   // 008 - תכף תתבקש להכניס את פרטי כרטיס האשראי שלך
         { type: 'go_to_folder', data: '199' }
     ]);
 }
@@ -680,14 +658,13 @@ async function handleUpdateDetails(call, phone) {
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' });
         } catch (e) {}
-        await call.id_list_message([{ type: 'text', data: 'המייל עודכן בהצלחה' }], { prependToNextAction: true });
+        // 028 - המייל עודכן בהצלחה
+        await call.id_list_message([MSG(28)], { prependToNextAction: true });
         return await handleUpdateDetails(call, phone);
 
     } else if (choice === '2') {
-        const fax = await call.read([{
-            type: 'text',
-            data: 'הקש את מספר הפקס שלך ולאחר מכן הקש סולמית'
-        }], 'tap', { max_digits: 15, terminate_keys: ['#'] });
+        // 029 - הקש את מספר הפקס שלך ולאחר מכן הקש סולמית
+        const fax = await call.read([MSG(29)], 'tap', { max_digits: 15, terminate_keys: ['#'] });
         const confirm = await call.read([{
             type: 'text',
             data: `מספר הפקס שהוקלד הוא ${fax} לאישור הקש 1 לתיקון הקש 2`
@@ -696,25 +673,26 @@ async function handleUpdateDetails(call, phone) {
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax, delivery_method: 'fax' });
         } catch (e) {}
-        await call.id_list_message([{ type: 'text', data: 'הפקס עודכן בהצלחה' }], { prependToNextAction: true });
+        // 030 - הפקס עודכן בהצלחה
+        await call.id_list_message([MSG(30)], { prependToNextAction: true });
         return await handleUpdateDetails(call, phone);
 
     } else if (choice === '3') {
-        const methodChoice = await call.read([{
-            type: 'text',
-            data: 'לשליחה למייל הקש 1 לשליחה לפקס הקש 2'
-        }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        // 031 - לשליחה למייל הקש 1, לשליחה לפקס הקש 2
+        const methodChoice = await call.read([MSG(31)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (methodChoice === '1') {
             try {
                 await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, delivery_method: 'email' });
             } catch (e) {}
-            await call.id_list_message([{ type: 'text', data: 'שיטת השליחה עודכנה למייל' }], { prependToNextAction: true });
+            // 032 - שיטת השליחה עודכנה למייל
+            await call.id_list_message([MSG(32)], { prependToNextAction: true });
         } else {
             try {
                 await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, delivery_method: 'fax' });
             } catch (e) {}
-            await call.id_list_message([{ type: 'text', data: 'שיטת השליחה עודכנה לפקס' }], { prependToNextAction: true });
+            // 033 - שיטת השליחה עודכנה לפקס
+            await call.id_list_message([MSG(33)], { prependToNextAction: true });
         }
         return await handleUpdateDetails(call, phone);
 
@@ -724,14 +702,13 @@ async function handleUpdateDetails(call, phone) {
 }
 
 async function handleAdminMessages(call) {
-    const msgId = await call.read([{
-        type: 'text',
-        data: 'הקש את מספר ההודעה ולסיום הקש סולמית'
-    }], 'tap', { max_digits: 10, terminate_keys: ['#'] });
+    // 034 - הקש את מספר ההודעה ולסיום הקש סולמית
+    const msgId = await call.read([MSG(34)], 'tap', { max_digits: 10, terminate_keys: ['#'] });
 
     if (!msgId) {
         await call.id_list_message([
-            { type: 'text', data: 'לא הוקש מספר שיחה טובה' },
+            // 035 - לא הוקש מספר, שיחה טובה
+            MSG(35),
             { type: 'go_to_folder', data: 'hangup' }
         ]);
         return;
@@ -745,26 +722,24 @@ async function handleAdminMessages(call) {
         console.error('admin messages error:', e.message);
         if (!e.message.includes('hangup')) {
             await call.id_list_message([
-                { type: 'text', data: 'שגיאה בטעינת ההודעה שיחה טובה' },
+                // 036 - שגיאה בטעינת ההודעה, שיחה טובה
+                MSG(36),
                 { type: 'go_to_folder', data: '/' }
             ]);
         }
         return;
     }
 
-    const again = await call.read([{
-        type: 'text',
-        data: 'לשמיעת הודעה נוספת הקש 1 לסיום הקש 2'
-    }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    // 037 - לשמיעת הודעה נוספת הקש 1, לסיום הקש 2
+    const again = await call.read([MSG(37)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (again === '1') {
         await handleAdminMessages(call);
     } else {
-        await call.id_list_message([
-            { type: 'go_to_folder', data: '/' }
-        ]);
+        await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
     }
 }
+
 app.use(router);
 
 const PORT = process.env.PORT || 3000;
