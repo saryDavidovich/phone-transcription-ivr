@@ -201,7 +201,9 @@ async function getDomainAndConfirmEmail(call, localPart, mode) {
     const emailSpoken = speakEmail(email);
 
     const confirm = await call.read([
-        { type: 'text', data: `המייל שהתקבל הוא ${emailSpoken} לאישור הקש 1 לתיקון הקש 2` }
+        MSG(66), // המייל שהתקבל הוא
+        { type: 'text', data: emailSpoken },
+        MSG(67), // לאישור הקש 1, לתיקון הקש 2
     ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (confirm === '1') return email;
@@ -478,7 +480,9 @@ async function handleRecording(call, phone, customer) {
             : `${balanceShekel} שקל`;
 
         const choice = await call.read([
-            { type: 'text', data: `שים לב, יתרתך נמוכה, ${balanceStr} בלבד, להמשך הקלטה הֵקֵש 1, לחזרה לתפריט הֵקֵש 0` }
+            MSG(61), // שים לב, יתרתך נמוכה
+            { type: 'text', data: balanceStr },
+            MSG(62), // בלבד, להמשך הקלטה הֵקֵש 1, לחזרה לתפריט הֵקֵש 0
         ], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
 
         if (choice === '0') {
@@ -505,7 +509,7 @@ async function handleRecording(call, phone, customer) {
             MSG(16),
             { type: 'text', data: balanceStr },
             MSG(17),
-            { type: 'text', data: tierName },
+            transcriptionTier === 'premium' ? MSG(59) : MSG(58), // 058=תמלול רגיל, 059=תמלול מקצועי
             MSG(18),
             { type: 'text', data: String(requiredPrice) },
             MSG(19),
@@ -620,7 +624,13 @@ async function handleTopUp(call, phone) {
             const threshold = parseFloat(s[`bonus_threshold_${i}`] || 0);
             const bonus = parseFloat(s[`bonus_amount_${i}`] || 0);
             if (threshold > 0 && bonus > 0) {
-                bonusMsg = [{ type: 'text', data: `שים לב, מבצע מיוחד, טעינה מ ${threshold} שקל, מקנה בונוס של ${bonus} שקל נוספים` }];
+                bonusMsg = [
+                    MSG(63), // שים לב, מבצע מיוחד, טעינה מ
+                    { type: 'text', data: String(threshold) },
+                    MSG(64), // שקל, מקנה בונוס של
+                    { type: 'text', data: String(bonus) },
+                    MSG(65), // שקל נוספים
+                ];
                 break;
             }
         }
@@ -644,14 +654,23 @@ async function handleUpdateDetails(call, phone) {
     } catch (e) {}
 
     const emailSpoken = customer && customer.email ? speakEmail(customer.email) : '';
-    const emailMsg = emailSpoken ? `המייל שלך הוא ${emailSpoken}` : 'לא מעודכן מייל';
-    const faxMsg = customer && customer.fax ? `הפקס שלך הוא ${customer.fax}` : 'לא מעודכן פקס';
-    const deliveryMsg = customer && customer.delivery_method === 'fax' ? 'שיטת השליחה היא פקס' : 'שיטת השליחה היא מייל';
+    const emailParts = emailSpoken
+        ? [MSG(68), { type: 'text', data: emailSpoken }] // המייל שלך הוא [דינמי]
+        : [MSG(74)]; // לא מעודכן מייל
+    const faxParts = (customer && customer.fax)
+        ? [MSG(69), { type: 'text', data: customer.fax }] // הפקס שלך הוא [דינמי]
+        : [MSG(75)]; // לא מעודכן פקס
+    const deliveryParts = [
+        MSG(70), // שיטת השליחה היא
+        (customer && customer.delivery_method === 'fax') ? MSG(72) : MSG(71), // פקס / מייל
+    ];
 
-    const choice = await call.read([{
-        type: 'text',
-        data: `${emailMsg} ${faxMsg} ${deliveryMsg} לעדכון מייל הקש 1 לעדכון פקס הקש 2 לשינוי שיטת שליחה הקש 3 לחזרה הקש 0`
-    }], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
+    const choice = await call.read([
+        ...emailParts,
+        ...faxParts,
+        ...deliveryParts,
+        MSG(73), // לעדכון מייל הקש 1, לעדכון פקס הקש 2, לשינוי שיטת שליחה הקש 3, לחזרה הקש 0
+    ], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
     if (choice === '1') {
         const email = await getEmail(call);
@@ -665,10 +684,11 @@ async function handleUpdateDetails(call, phone) {
     } else if (choice === '2') {
         // 029 - הקש את מספר הפקס שלך ולאחר מכן הקש סולמית
         const fax = await call.read([MSG(29)], 'tap', { max_digits: 15, terminate_keys: ['#'] });
-        const confirm = await call.read([{
-            type: 'text',
-            data: `מספר הפקס שהוקלד הוא ${fax} לאישור הקש 1 לתיקון הקש 2`
-        }], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        const confirm = await call.read([
+            MSG(76), // מספר הפקס שהוקלד הוא
+            { type: 'text', data: fax },
+            MSG(67), // לאישור הקש 1, לתיקון הקש 2
+        ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
         if (confirm === '2') return await handleUpdateDetails(call, phone);
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax, delivery_method: 'fax' });
