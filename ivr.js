@@ -257,6 +257,36 @@ router.get('/', async (call) => {
         }
     }
 
+    // בדוק הקלטות ממתינות לתשלום
+    try {
+        const pendingRes = await axios.get(`${PYTHON_URL}/api/customer/pending-recordings?phone=${phone}`);
+        const pending = pendingRes.data;
+        if (pending.has_pending) {
+            if (pending.enough_balance) {
+                // יש יתרה עכשיו - הפעל תמלול אוטומטית
+                await axios.post(`${PYTHON_URL}/api/process-pending`, { phone });
+                await call.id_list_message([
+                    MSG(77),  // נמצאה הקלטה ממתינה באורך
+                    { type: 'text', data: String(pending.minutes) },
+                    MSG(81),  // דקות, יש לך עכשיו יתרה מספיקה, התמלול יתחיל עכשיו וישלח אליך בקרוב
+                ], { prependToNextAction: true });
+            } else {
+                // עדיין אין יתרה מספיקה
+                await call.id_list_message([
+                    MSG(77),  // נמצאה הקלטה ממתינה באורך
+                    { type: 'text', data: String(pending.minutes) },
+                    MSG(78),  // דקות, העלות היא
+                    { type: 'text', data: String(pending.cost) },
+                    MSG(79),  // שקל, יתרתך היא
+                    { type: 'text', data: String(pending.balance) },
+                    MSG(80),  // שקל, אנא טען ארנק כדי שהתמלול יבוצע
+                ], { prependToNextAction: true });
+            }
+        }
+    } catch (e) {
+        console.error('pending check error:', e.message);
+    }
+
     const ADMIN_PHONE = '0527134491';
     const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 5, 6, 9] : [1, 2, 3, 5, 6, 9];
 
