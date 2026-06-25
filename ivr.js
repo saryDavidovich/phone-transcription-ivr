@@ -519,11 +519,14 @@ async function handleRecording(call, phone, customer) {
         }
     }
 
-    // 083 - קובץ ריק — הכרזת מחיר זמנית (להחליף לפי צורך)
     // 015 - לתמלול רגיל הקש 1, לתמלול מקצועי הקש 2
-    const tierChoice = await call.read([MSG(83), MSG(15)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    // 083 - קובץ ריק — הכרזת מחיר זמנית (מושמע אחרי הבחירה, לפני ההקלטה)
+    const tierChoice = await call.read([MSG(15)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     const transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
+
+    // 083 - הכרזת מחיר זמנית (מושמעת אחרי הבחירה)
+    await call.id_list_message([MSG(83)], { prependToNextAction: true });
 
     const requiredPrice = transcriptionTier === 'premium' ? pricePremium : priceBasic;
     if (balance < requiredPrice) {
@@ -676,8 +679,7 @@ async function handleUpdateDetails(call, phone) {
         ...emailParts,
         ...faxParts,
         ...deliveryParts,
-        MSG(73), // לעדכון מייל הקש 1, לעדכון פקס הקש 2, לשינוי שיטת שליחה הקש 3, לחזרה הקש 0
-        MSG(84), // לעדכון ברירת מחדל הקש 4
+        MSG(73), // לעדכון מייל הקש 1, לעדכון פקס הקש 2, לשינוי שיטת שליחה הקש 3, לחזרה הקש 0 לעדכון ברירת מחדל הקש 4
     ], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3, 4] });
 
     if (choice === '1') {
@@ -733,37 +735,53 @@ async function handleUpdateDetails(call, phone) {
 }
 
 async function handleDefaultSettings(call, phone, customer) {
-    // הצג ברירת מחדל נוכחית
-    const defaults = customer && customer.default_settings ? customer.default_settings : {};
-    const tierName = defaults.tier === 'premium' ? 'תמלול מקצועי' : 'תמלול רגיל';
-    const langName = defaults.language === 'yi' ? 'יידיש' : defaults.language === 'en' ? 'אנגלית' : 'עברית';
-    const outLangName = defaults.output_language === 'yi' ? 'יידיש' : defaults.output_language === 'en' ? 'אנגלית' : 'עברית';
+    // טען נתונים עדכניים מהשרת
+    let currentDefaults = {};
+    try {
+        const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
+        currentDefaults = res.data.default_settings || {};
+        customer = res.data;
+    } catch (e) {
+        currentDefaults = customer && customer.default_settings ? customer.default_settings : {};
+    }
 
-    const tierChoice = await call.read([
+    const tierName = currentDefaults.tier === 'premium' ? 'תמלול מקצועי' : 'תמלול רגיל';
+    const langName = currentDefaults.language === 'yi' ? 'יידיש' : currentDefaults.language === 'en' ? 'אנגלית' : 'עברית';
+    const outLangName = currentDefaults.output_language === 'yi' ? 'יידיש' : currentDefaults.output_language === 'en' ? 'אנגלית' : 'עברית';
+
+    const choice = await call.read([
         MSG(85), // ברירת המחדל הנוכחית שלך היא
         { type: 'text', data: `${tierName}, שפת הקלטה ${langName}, שפת פלט ${outLangName}` },
         MSG(86), // לשינוי סוג תמלול הקש 1, לשינוי שפת הקלטה הקש 2, לשינוי שפת פלט הקש 3, לחזרה הקש 0
     ], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
-    if (tierChoice === '0') return;
+    if (choice === '0') return;
 
-    let newDefaults = { ...defaults };
+    let newDefaults = { ...currentDefaults };
 
-    if (tierChoice === '1') {
+    if (choice === '1') {
+        // שינוי סוג תמלול
         const t = await call.read([MSG(15)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
         newDefaults.tier = t === '2' ? 'premium' : 'gemini';
-    } else if (tierChoice === '2') {
+    } else if (choice === '2') {
+        // שינוי שפת הקלטה
         const l = await call.read([MSG(20)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
         newDefaults.language = l === '2' ? 'yi' : l === '3' ? 'en' : 'he';
-    } else if (tierChoice === '3') {
-        const lang = newDefaults.language || 'he';
+        // איפוס שפת פלט להתאמה
+        newDefaults.output_language = newDefaults.language;
+    } else if (choice === '3') {
+        // שינוי שפת פלט — לפי שפת ההקלטה הנוכחית
+        const lang = currentDefaults.language || 'he';
         if (lang === 'yi') {
             const o = await call.read([MSG(21)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
-            newDefaults.output_language = o === '2' ? 'he' : 'yi';
+            // 021: הקש 1 = יידיש, הקש 2 = עברית
+            newDefaults.output_language = o === '1' ? 'yi' : 'he';
         } else if (lang === 'en') {
             const o = await call.read([MSG(22)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
-            newDefaults.output_language = o === '2' ? 'he' : 'en';
+            // 022: הקש 1 = אנגלית, הקש 2 = עברית
+            newDefaults.output_language = o === '1' ? 'en' : 'he';
         } else {
+            // עברית — שפת פלט תמיד עברית
             newDefaults.output_language = 'he';
         }
     }
@@ -774,6 +792,9 @@ async function handleDefaultSettings(call, phone, customer) {
     } catch (e) {
         console.error('update default settings error:', e.message);
     }
+
+    // חזור לתפריט ברירת מחדל (לא לעדכון פרטים)
+    return await handleDefaultSettings(call, phone, customer);
 }
 
 async function handleExplainMenu(call, phone, customer) {
