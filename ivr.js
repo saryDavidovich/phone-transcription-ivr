@@ -288,7 +288,7 @@ router.get('/', async (call) => {
     }
 
     const ADMIN_PHONE = '0527134491';
-    const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 5, 6, 9] : [1, 2, 3, 5, 6, 9];
+    const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 4, 5, 6, 9] : [1, 2, 3, 4, 5, 6, 9];
 
     const choice = await call.read([
         MSG(1),   // 001 - שלום, ברוכים הבאים למערכת התמלול
@@ -299,12 +299,10 @@ router.get('/', async (call) => {
 
     if (choice === '1') {
         await handleRecording(call, phone, customer);
+    } else if (choice === '4') {
+        await handleQuickRecord(call, phone, customer);
     } else if (choice === '3') {
-        await call.id_list_message([
-            // 006 - מערכת זו מאפשרת להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס, שיחה טובה
-            MSG(6),
-            { type: 'go_to_folder', data: '/' }
-        ]);
+        await handleExplainMenu(call, phone, customer);
     } else if (choice === '5') {
         await handleEmailInstructions(call, phone, customer);
     } else if (choice === '6') {
@@ -521,8 +519,9 @@ async function handleRecording(call, phone, customer) {
         }
     }
 
+    // 083 - קובץ ריק — הכרזת מחיר זמנית (להחליף לפי צורך)
     // 015 - לתמלול רגיל הקש 1, לתמלול מקצועי הקש 2
-    const tierChoice = await call.read([MSG(15)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    const tierChoice = await call.read([MSG(83), MSG(15)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     const transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
 
@@ -646,30 +645,8 @@ async function handleOptions(call, phone) {
 }
 
 async function handleTopUp(call, phone) {
-    let bonusMsg = [];
-    try {
-        const settingsRes = await axios.get(`${PYTHON_URL}/api/settings`);
-        const s = settingsRes.data;
-        for (let i = 1; i <= 3; i++) {
-            const threshold = parseFloat(s[`bonus_threshold_${i}`] || 0);
-            const bonus = parseFloat(s[`bonus_amount_${i}`] || 0);
-            if (threshold > 0 && bonus > 0) {
-                bonusMsg = [
-                    MSG(63), // שים לב, מבצע מיוחד, טעינה מ
-                    { type: 'text', data: String(threshold) },
-                    MSG(64), // שקל, מקנה בונוס של
-                    { type: 'text', data: String(bonus) },
-                    MSG(65), // שקל נוספים
-                ];
-                break;
-            }
-        }
-    } catch (e) {
-        console.error('could not fetch settings for topup:', e.message);
-    }
-
     await call.id_list_message([
-        ...bonusMsg,
+        MSG(82),  // 082 - קובץ ריק — הכרזת מבצע זמנית (להחליף לפי צורך)
         MSG(7),   // 007 - קובץ ריק — הודעה זמנית לפני סליקה
         MSG(8),   // 008 - תכף תתבקש להכניס את פרטי כרטיס האשראי שלך
         { type: 'go_to_folder', data: '199' }
@@ -700,7 +677,8 @@ async function handleUpdateDetails(call, phone) {
         ...faxParts,
         ...deliveryParts,
         MSG(73), // לעדכון מייל הקש 1, לעדכון פקס הקש 2, לשינוי שיטת שליחה הקש 3, לחזרה הקש 0
-    ], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
+        MSG(84), // לעדכון ברירת מחדל הקש 4
+    ], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3, 4] });
 
     if (choice === '1') {
         const email = await getEmail(call);
@@ -746,9 +724,148 @@ async function handleUpdateDetails(call, phone) {
         }
         return await handleUpdateDetails(call, phone);
 
+    } else if (choice === '4') {
+        await handleDefaultSettings(call, phone, customer);
+        return await handleUpdateDetails(call, phone);
     } else {
         await handleOptions(call, phone);
     }
+}
+
+async function handleDefaultSettings(call, phone, customer) {
+    // הצג ברירת מחדל נוכחית
+    const defaults = customer && customer.default_settings ? customer.default_settings : {};
+    const tierName = defaults.tier === 'premium' ? 'תמלול מקצועי' : 'תמלול רגיל';
+    const langName = defaults.language === 'yi' ? 'יידיש' : defaults.language === 'en' ? 'אנגלית' : 'עברית';
+    const outLangName = defaults.output_language === 'yi' ? 'יידיש' : defaults.output_language === 'en' ? 'אנגלית' : 'עברית';
+
+    const tierChoice = await call.read([
+        MSG(85), // ברירת המחדל הנוכחית שלך היא
+        { type: 'text', data: `${tierName}, שפת הקלטה ${langName}, שפת פלט ${outLangName}` },
+        MSG(86), // לשינוי סוג תמלול הקש 1, לשינוי שפת הקלטה הקש 2, לשינוי שפת פלט הקש 3, לחזרה הקש 0
+    ], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
+
+    if (tierChoice === '0') return;
+
+    let newDefaults = { ...defaults };
+
+    if (tierChoice === '1') {
+        const t = await call.read([MSG(15)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        newDefaults.tier = t === '2' ? 'premium' : 'gemini';
+    } else if (tierChoice === '2') {
+        const l = await call.read([MSG(20)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
+        newDefaults.language = l === '2' ? 'yi' : l === '3' ? 'en' : 'he';
+    } else if (tierChoice === '3') {
+        const lang = newDefaults.language || 'he';
+        if (lang === 'yi') {
+            const o = await call.read([MSG(21)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+            newDefaults.output_language = o === '2' ? 'he' : 'yi';
+        } else if (lang === 'en') {
+            const o = await call.read([MSG(22)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+            newDefaults.output_language = o === '2' ? 'he' : 'en';
+        } else {
+            newDefaults.output_language = 'he';
+        }
+    }
+
+    try {
+        await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, default_settings: newDefaults });
+        await call.id_list_message([MSG(87)], { prependToNextAction: true }); // ברירת המחדל עודכנה
+    } catch (e) {
+        console.error('update default settings error:', e.message);
+    }
+}
+
+async function handleExplainMenu(call, phone, customer) {
+    // 006 - הסבר מערכת, 088 - תנאי שימוש
+    const choice = await call.read([
+        MSG(88), // להסבר על המערכת הקש 1, לתנאי שימוש הקש 2
+    ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+
+    if (choice === '1') {
+        await call.id_list_message([
+            MSG(6),   // 006 - הסבר על המערכת
+            { type: 'go_to_folder', data: '/' }
+        ]);
+    } else {
+        await call.id_list_message([
+            MSG(89), // 089 - תנאי שימוש
+            { type: 'go_to_folder', data: '/' }
+        ]);
+    }
+}
+
+async function handleQuickRecord(call, phone, customer) {
+    const balance = customer ? parseFloat(customer.balance || 0) : 0;
+
+    let priceBasic = 0.90;
+    try {
+        const settingsRes = await axios.get(`${PYTHON_URL}/api/settings`);
+        priceBasic = parseFloat(settingsRes.data.price_per_20min_basic || 0.90);
+    } catch (e) {}
+
+    if (balance < priceBasic) {
+        await call.id_list_message([
+            balance <= 0 ? MSG(12) : MSG(13),
+            ...(balance > 0 ? [{ type: 'text', data: `${Math.floor(balance)} שקל` }, MSG(14)] : []),
+            { type: 'go_to_folder', data: '/' }
+        ]);
+        return;
+    }
+
+    // טען ברירות מחדל של הלקוח
+    const defaults = customer && customer.default_settings ? customer.default_settings : {};
+    const transcriptionTier = defaults.tier || 'gemini';
+    const language = defaults.language || 'he';
+    const outputLanguage = defaults.output_language || 'he';
+
+    // הקלטה מיידית
+    const recPath = await call.read([MSG(23)], 'record', {
+        no_confirm_menu: true,
+        save_on_hangup: true,
+        path: '/recordings'
+    });
+
+    let fullRecUrl = recPath;
+    if (recPath && !recPath.startsWith('http')) {
+        fullRecUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${recPath}`;
+    }
+
+    let deliveryMethod = customer ? customer.delivery_method : '';
+    let deliveredTo = '';
+
+    if (deliveryMethod === 'fax') {
+        deliveredTo = customer ? (customer.fax || '') : '';
+    } else if (deliveryMethod === 'email') {
+        deliveredTo = customer ? (customer.email || '') : '';
+    }
+
+    if (!deliveredTo) {
+        const deliveryChoice = await call.read([MSG(24)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        if (deliveryChoice === '1') {
+            const email = await getEmail(call);
+            deliveryMethod = 'email';
+            deliveredTo = email;
+            try { await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' }); } catch (e) {}
+        } else {
+            const fax = await call.read([MSG(25)], 'tap', { max_digits: 15, terminate_keys: ['#'] });
+            deliveryMethod = 'fax';
+            deliveredTo = fax;
+            try { await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax, delivery_method: 'fax' }); } catch (e) {}
+        }
+    }
+
+    try {
+        await axios.post(`${PYTHON_URL}/api/transcribe`, {
+            phone, rec_url: fullRecUrl, call_id: call.ApiCallId,
+            delivery_method: deliveryMethod, delivered_to: deliveredTo,
+            transcription_tier: transcriptionTier, language, output_language: outputLanguage
+        });
+    } catch (e) {
+        console.error('quick record transcribe error:', e.message);
+    }
+
+    await call.id_list_message([MSG(26), { type: 'go_to_folder', data: '/' }]);
 }
 
 async function handleAdminMessages(call) {
