@@ -519,18 +519,12 @@ async function handleRecording(call, phone, customer) {
         }
     }
 
-    // 015 - לתמלול רגיל הקש 1, לתמלול מקצועי הקש 2
-    const tierChoice = await call.read([MSG(15)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    // 015 - לתמלול רגיל הקש 1 לתמלול מקצועי הקש 2, 083 - הכרזת מחיר, ואז הלקוח בוחר
+    const tierChoice = await call.read([MSG(15), MSG(83)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     const transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
 
-    // 083 - הכרזת מחיר — נשמע לפני בדיקת יתרה ולפני ההקלטה
-    // משולב בתוך read הבא כדי שישמע בפועל
-
     const requiredPrice = transcriptionTier === 'premium' ? pricePremium : priceBasic;
-
-    // שמע הכרזת מחיר לפני כל המשך
-    await call.id_list_message([MSG(83)], { prependToNextAction: true });
 
     if (balance < requiredPrice) {
         const balanceShekel = Math.floor(balance);
@@ -538,13 +532,11 @@ async function handleRecording(call, phone, customer) {
         const balanceStr = balanceAgorot > 0
             ? `${balanceShekel} שקל ו ${balanceAgorot} אגורות`
             : `${balanceShekel} שקל`;
-        const tierName = transcriptionTier === 'premium' ? 'תמלול מקצועי' : 'תמלול רגיל';
         await call.id_list_message([
-            // 016 - מצטערים, יתרתך [דינמי] 017 - אינה מספיקה ל [דינמי-שם תמלול] 018 - העולה [דינמי-מחיר] 019 - שקל, לחזרה לתפריט הקש כל מקש
             MSG(16),
             { type: 'text', data: balanceStr },
             MSG(17),
-            transcriptionTier === 'premium' ? MSG(59) : MSG(58), // 058=תמלול רגיל, 059=תמלול מקצועי
+            transcriptionTier === 'premium' ? MSG(59) : MSG(58),
             MSG(18),
             { type: 'text', data: String(requiredPrice) },
             MSG(19),
