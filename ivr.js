@@ -520,15 +520,18 @@ async function handleRecording(call, phone, customer) {
     }
 
     // 015 - לתמלול רגיל הקש 1, לתמלול מקצועי הקש 2
-    // 083 - קובץ ריק — הכרזת מחיר זמנית (מושמע אחרי הבחירה, לפני ההקלטה)
     const tierChoice = await call.read([MSG(15)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     const transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
 
-    // 083 - הכרזת מחיר זמנית (מושמעת אחרי הבחירה)
-    await call.id_list_message([MSG(83)], { prependToNextAction: true });
+    // 083 - הכרזת מחיר — נשמע לפני בדיקת יתרה ולפני ההקלטה
+    // משולב בתוך read הבא כדי שישמע בפועל
 
     const requiredPrice = transcriptionTier === 'premium' ? pricePremium : priceBasic;
+
+    // שמע הכרזת מחיר לפני כל המשך
+    await call.id_list_message([MSG(83)], { prependToNextAction: true });
+
     if (balance < requiredPrice) {
         const balanceShekel = Math.floor(balance);
         const balanceAgorot = Math.round((balance - balanceShekel) * 100);
@@ -739,10 +742,19 @@ async function handleDefaultSettings(call, phone, customer) {
     let currentDefaults = {};
     try {
         const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
-        currentDefaults = res.data.default_settings || {};
+        const ds = res.data.default_settings;
+        // תמיכה ב-JSON string וב-object
+        if (typeof ds === 'string') {
+            currentDefaults = JSON.parse(ds);
+        } else if (ds && typeof ds === 'object') {
+            currentDefaults = ds;
+        } else {
+            currentDefaults = {};
+        }
         customer = res.data;
     } catch (e) {
-        currentDefaults = customer && customer.default_settings ? customer.default_settings : {};
+        console.error('load defaults error:', e.message);
+        currentDefaults = {};
     }
 
     const tierName = currentDefaults.tier === 'premium' ? 'תמלול מקצועי' : 'תמלול רגיל';
@@ -825,16 +837,7 @@ async function handleQuickRecord(call, phone, customer) {
         priceBasic = parseFloat(settingsRes.data.price_per_20min_basic || 0.90);
     } catch (e) {}
 
-    if (balance < priceBasic) {
-        await call.id_list_message([
-            balance <= 0 ? MSG(12) : MSG(13),
-            ...(balance > 0 ? [{ type: 'text', data: `${Math.floor(balance)} שקל` }, MSG(14)] : []),
-            { type: 'go_to_folder', data: '/' }
-        ]);
-        return;
-    }
-
-    // טען ברירות מחדל של הלקוח
+    // טען ברירות מחדל של הלקוח (גם אם אין כסף — עדיין מקליטים ושומרים)
     const defaults = customer && customer.default_settings ? customer.default_settings : {};
     const transcriptionTier = defaults.tier || 'gemini';
     const language = defaults.language || 'he';
