@@ -757,15 +757,31 @@ async function handleDefaultSettings(call, phone, customer) {
         currentDefaults = {};
     }
 
-    const tierName = currentDefaults.tier === 'premium' ? 'תמלול מקצועי' : 'תמלול רגיל';
-    const langName = currentDefaults.language === 'yi' ? 'יידיש' : currentDefaults.language === 'en' ? 'אנגלית' : 'עברית';
-    const outLangName = currentDefaults.output_language === 'yi' ? 'יידיש' : currentDefaults.output_language === 'en' ? 'אנגלית' : 'עברית';
+    const isPremium = currentDefaults.tier === 'premium';
+    const tierName = isPremium ? 'תמלול מקצועי' : 'תמלול רגיל';
+    const outLangName = currentDefaults.output_language === 'original' ? 'שפת ההקלטה'
+        : currentDefaults.output_language === 'yi' ? 'יידיש'
+        : currentDefaults.output_language === 'en' ? 'אנגלית' : 'עברית';
+
+    let summaryText, allowedChoices;
+
+    if (isPremium) {
+        // תמלול מקצועי — רק סוג תמלול + שפת פלט
+        summaryText = `${tierName}, שפת פלט ${outLangName}`;
+        allowedChoices = [0, 1, 3]; // אין אפשרות 2 (שפת הקלטה)
+    } else {
+        const langName = currentDefaults.language === 'yi' ? 'יידיש' : currentDefaults.language === 'en' ? 'אנגלית' : 'עברית';
+        summaryText = `${tierName}, שפת הקלטה ${langName}, שפת פלט ${outLangName}`;
+        allowedChoices = [0, 1, 2, 3];
+    }
 
     const choice = await call.read([
         MSG(85), // ברירת המחדל הנוכחית שלך היא
-        { type: 'text', data: `${tierName}, שפת הקלטה ${langName}, שפת פלט ${outLangName}` },
-        MSG(86), // לשינוי סוג תמלול הקש 1, לשינוי שפת הקלטה הקש 2, לשינוי שפת פלט הקש 3, לחזרה הקש 0
-    ], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
+        { type: 'text', data: summaryText },
+        isPremium ? MSG(91) : MSG(86),
+        // 091 - לשינוי סוג תמלול הקש 1, לשינוי שפת פלט הקש 3, לחזרה הקש 0
+        // 086 - לשינוי סוג תמלול הקש 1, לשינוי שפת הקלטה הקש 2, לשינוי שפת פלט הקש 3, לחזרה הקש 0
+    ], 'tap', { max_digits: 1, digits_allowed: allowedChoices });
 
     if (choice === '0') return;
 
@@ -775,26 +791,33 @@ async function handleDefaultSettings(call, phone, customer) {
         // שינוי סוג תמלול
         const t = await call.read([MSG(15)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
         newDefaults.tier = t === '2' ? 'premium' : 'gemini';
-    } else if (choice === '2') {
-        // שינוי שפת הקלטה
+        // איפוס שפת פלט בהתאם לסוג החדש
+        if (newDefaults.tier === 'premium') {
+            newDefaults.output_language = 'he';
+        }
+    } else if (choice === '2' && !isPremium) {
+        // שינוי שפת הקלטה — רק לגמיני
         const l = await call.read([MSG(20)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
         newDefaults.language = l === '2' ? 'yi' : l === '3' ? 'en' : 'he';
-        // איפוס שפת פלט להתאמה
         newDefaults.output_language = newDefaults.language;
     } else if (choice === '3') {
-        // שינוי שפת פלט — לפי שפת ההקלטה הנוכחית
-        const lang = currentDefaults.language || 'he';
-        if (lang === 'yi') {
-            const o = await call.read([MSG(21)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
-            // 021: הקש 1 = יידיש, הקש 2 = עברית
-            newDefaults.output_language = o === '1' ? 'yi' : 'he';
-        } else if (lang === 'en') {
-            const o = await call.read([MSG(22)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
-            // 022: הקש 1 = אנגלית, הקש 2 = עברית
-            newDefaults.output_language = o === '1' ? 'en' : 'he';
+        if (isPremium) {
+            // אלף בוט — עברית או שפת ההקלטה
+            // 090 - לקבל את התמלול בעברית הקש 1, בשפת ההקלטה הקש 2
+            const o = await call.read([MSG(90)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+            newDefaults.output_language = o === '1' ? 'he' : 'original';
         } else {
-            // עברית — שפת פלט תמיד עברית
-            newDefaults.output_language = 'he';
+            // גמיני — לפי שפת ההקלטה
+            const lang = currentDefaults.language || 'he';
+            if (lang === 'yi') {
+                const o = await call.read([MSG(21)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+                newDefaults.output_language = o === '1' ? 'yi' : 'he';
+            } else if (lang === 'en') {
+                const o = await call.read([MSG(22)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+                newDefaults.output_language = o === '1' ? 'en' : 'he';
+            } else {
+                newDefaults.output_language = 'he';
+            }
         }
     }
 
