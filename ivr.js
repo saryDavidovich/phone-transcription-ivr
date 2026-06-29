@@ -545,21 +545,29 @@ async function handleRecording(call, phone, customer) {
         return;
     }
 
-    // 020 - לתמלול בעברית הקש 1, ביידיש הקש 2, באנגלית הקש 3
     let language = 'he';
     let outputLanguage = 'he';
-    const langChoice = await call.read([MSG(20)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
 
-    language = langChoice === '2' ? 'yi' : langChoice === '3' ? 'en' : 'he';
+    if (transcriptionTier === 'premium') {
+        // אלף בוט — שואל רק על שפת פלט (הוא מזהה שפת הקלטה אוטומטית)
+        // 090 - לקבל את התמלול בעברית הקש 1, בשפת ההקלטה הקש 2
+        const outChoice = await call.read([MSG(90)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        outputLanguage = outChoice === '1' ? 'he' : 'original';
+    } else {
+        // גמיני — שואל על שפת הקלטה ושפת פלט
+        // 020 - לתמלול בעברית הקש 1, ביידיש הקש 2, באנגלית הקש 3
+        const langChoice = await call.read([MSG(20)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
+        language = langChoice === '2' ? 'yi' : langChoice === '3' ? 'en' : 'he';
 
-    if (language === 'yi') {
-        // 021 - לקבל את התמלול ביידיש הקש 1, בעברית הקש 2
-        const outChoice = await call.read([MSG(21)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
-        outputLanguage = outChoice === '2' ? 'he' : 'yi';
-    } else if (language === 'en') {
-        // 022 - לקבל את התמלול באנגלית הקש 1, בעברית הקש 2
-        const outChoice = await call.read([MSG(22)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
-        outputLanguage = outChoice === '2' ? 'he' : 'en';
+        if (language === 'yi') {
+            // 021 - לקבל את התמלול ביידיש הקש 1, בעברית הקש 2
+            const outChoice = await call.read([MSG(21)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+            outputLanguage = outChoice === '2' ? 'he' : 'yi';
+        } else if (language === 'en') {
+            // 022 - לקבל את התמלול באנגלית הקש 1, בעברית הקש 2
+            const outChoice = await call.read([MSG(22)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+            outputLanguage = outChoice === '2' ? 'he' : 'en';
+        }
     }
 
     // 023 - השאר את הודעתך לאחר הצליל, לסיום הקש סולמית או נתק
