@@ -300,9 +300,9 @@ router.get('/', async (call) => {
     const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 4, 5, 6, 9] : [1, 2, 3, 4, 5, 6, 9];
 
     const choice = await call.read([
+        ...pendingParts,  // הודעת הקלטה ממתינה לתשלום — נשמעת ראשונה, לפני הברכה
         MSG(1),   // 001 - שלום, ברוכים הבאים למערכת התמלול
         MSG(2),   // 002 - קובץ ריק — הודעה זמנית לכניסה
-        ...pendingParts,  // הודעת הקלטה ממתינה לתשלום — נשמעת מיד בכניסה, לפני התפריט
         ...balanceParts,
         MSG(4),   // 004 - תפריט ראשי: הקש 1... הקש 9
     ], 'tap', { max_digits: 1, digits_allowed: allowedDigits });
