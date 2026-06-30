@@ -230,11 +230,19 @@ router.get('/', async (call) => {
         const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
         customer = res.data;
         if (customer.is_blocked) {
-            await call.id_list_message([
+            const blockedChoice = await call.read([
                 // 005 - מצטערים, חשבונך חסום, לפרטים פנה לשירות לקוחות
                 MSG(5),
-                { type: 'go_to_folder', data: 'hangup' }
-            ]);
+                // 010 - השאר הודעתך למנהל לאחר הצליל, לסיום הקש סולמית
+                // (לפני כן: הקש 9 להשארת הודעה למנהל - כבר חלק מ-MSG(5) אם רוצים, נוסיף הנחיה)
+            ], 'tap', { max_digits: 1, digits_allowed: [9], sec_wait: 5 });
+
+            if (blockedChoice === '9') {
+                await handleManagerMessage(call, phone, customer);
+                return;
+            }
+
+            await call.id_list_message([{ type: 'go_to_folder', data: 'hangup' }]);
             return;
         }
     } catch (e) {
@@ -320,16 +328,17 @@ async function handleEmailInstructions(call, phone, customer) {
     const hasEmail = !!(customer && customer.email);
     const phoneSpoken = speakDigits(phone);
 
-    if (hasEmail) {
-        const choice = await call.read([
-            // 041 - הסבר שלוחה 5 עד לפני מספר הטלפון
-            MSG(41),
-            { type: 'text', data: phoneSpoken },
-            // 042 - המשך הסבר שלוחה 5 + הקש 1 לקבלת הוראות, הקש 0 לחזרה
-            MSG(42),
-        ], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
+    // כל לקוח שומע את ההסבר המלא, עם מייל או בלי
+    const choice = await call.read([
+        // 041 - הסבר שלוחה 5 עד לפני מספר הטלפון
+        MSG(41),
+        { type: 'text', data: phoneSpoken },
+        // 042 - המשך הסבר שלוחה 5 + הקש 1 לקבלת הוראות, הקש 0 לחזרה
+        MSG(42),
+    ], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
 
-        if (choice === '1') {
+    if (choice === '1') {
+        if (hasEmail) {
             try {
                 await axios.post(`${PYTHON_URL}/api/send-email-instructions`, { phone });
                 await call.id_list_message([
@@ -345,37 +354,34 @@ async function handleEmailInstructions(call, phone, customer) {
                     { type: 'go_to_folder', data: '/' }
                 ]);
             }
-            return;
+        } else {
+            await call.id_list_message([
+                // 040 - כדי לקבל הוראות מפורטות במייל יש לעדכן קודם כתובת מייל...
+                MSG(40),
+                { type: 'go_to_folder', data: '/' }
+            ]);
         }
-
-        await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
-
-    } else {
-        await call.id_list_message([
-            // 041 - הסבר שלוחה 5 עד לפני מספר הטלפון
-            MSG(41),
-            { type: 'text', data: phoneSpoken },
-            // 040 - כדי לקבל הוראות מפורטות במייל יש לעדכן קודם כתובת מייל...
-            MSG(40),
-            { type: 'go_to_folder', data: '/' }
-        ]);
+        return;
     }
+
+    await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
 }
 
 async function handleHandwritingInstructions(call, phone, customer) {
     const hasEmail = !!(customer && customer.email);
     const phoneSpoken = speakDigits(phone);
 
-    if (hasEmail) {
-        const choice = await call.read([
-            // 043 - הסבר שלוחה 6 עד לפני מספר הטלפון
-            MSG(43),
-            { type: 'text', data: phoneSpoken },
-            // 044 - המשך הסבר שלוחה 6 + הקש 1 לקבלת הוראות, הקש 0 לחזרה
-            MSG(44),
-        ], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
+    // כל לקוח שומע את ההסבר המלא, עם מייל או בלי
+    const choice = await call.read([
+        // 043 - הסבר שלוחה 6 עד לפני מספר הטלפון
+        MSG(43),
+        { type: 'text', data: phoneSpoken },
+        // 044 - המשך הסבר שלוחה 6 + הקש 1 לקבלת הוראות, הקש 0 לחזרה
+        MSG(44),
+    ], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
 
-        if (choice === '1') {
+    if (choice === '1') {
+        if (hasEmail) {
             try {
                 await axios.post(`${PYTHON_URL}/api/send-handwriting-instructions`, { phone });
                 await call.id_list_message([
@@ -391,21 +397,17 @@ async function handleHandwritingInstructions(call, phone, customer) {
                     { type: 'go_to_folder', data: '/' }
                 ]);
             }
-            return;
+        } else {
+            await call.id_list_message([
+                // 040 - כדי לקבל הוראות מפורטות במייל יש לעדכן קודם כתובת מייל...
+                MSG(40),
+                { type: 'go_to_folder', data: '/' }
+            ]);
         }
-
-        await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
-
-    } else {
-        await call.id_list_message([
-            // 043 - הסבר שלוחה 6 עד לפני מספר הטלפון
-            MSG(43),
-            { type: 'text', data: phoneSpoken },
-            // 040 - כדי לקבל הוראות מפורטות במייל יש לעדכן קודם כתובת מייל...
-            MSG(40),
-            { type: 'go_to_folder', data: '/' }
-        ]);
+        return;
     }
+
+    await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
 }
 
 async function handleManagerMessage(call, phone, customer) {
