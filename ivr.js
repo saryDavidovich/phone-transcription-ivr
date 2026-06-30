@@ -266,6 +266,7 @@ router.get('/', async (call) => {
     }
 
     // בדוק הקלטות ממתינות לתשלום
+    let pendingParts = [];
     try {
         const pendingRes = await axios.get(`${PYTHON_URL}/api/customer/pending-recordings?phone=${phone}`);
         const pending = pendingRes.data;
@@ -273,14 +274,14 @@ router.get('/', async (call) => {
             if (pending.enough_balance) {
                 // יש יתרה עכשיו - הפעל תמלול אוטומטית
                 await axios.post(`${PYTHON_URL}/api/process-pending`, { phone });
-                await call.id_list_message([
+                pendingParts = [
                     MSG(77),  // נמצאה הקלטה ממתינה באורך
                     { type: 'text', data: String(pending.minutes) },
                     MSG(81),  // דקות, יש לך עכשיו יתרה מספיקה, התמלול יתחיל עכשיו וישלח אליך בקרוב
-                ], { prependToNextAction: true });
+                ];
             } else {
                 // עדיין אין יתרה מספיקה
-                await call.id_list_message([
+                pendingParts = [
                     MSG(77),  // נמצאה הקלטה ממתינה באורך
                     { type: 'text', data: String(pending.minutes) },
                     MSG(78),  // דקות, העלות היא
@@ -288,7 +289,7 @@ router.get('/', async (call) => {
                     MSG(79),  // שקל, יתרתך היא
                     { type: 'text', data: String(pending.balance) },
                     MSG(80),  // שקל, אנא טען ארנק כדי שהתמלול יבוצע
-                ], { prependToNextAction: true });
+                ];
             }
         }
     } catch (e) {
@@ -301,6 +302,7 @@ router.get('/', async (call) => {
     const choice = await call.read([
         MSG(1),   // 001 - שלום, ברוכים הבאים למערכת התמלול
         MSG(2),   // 002 - קובץ ריק — הודעה זמנית לכניסה
+        ...pendingParts,  // הודעת הקלטה ממתינה לתשלום — נשמעת מיד בכניסה, לפני התפריט
         ...balanceParts,
         MSG(4),   // 004 - תפריט ראשי: הקש 1... הקש 9
     ], 'tap', { max_digits: 1, digits_allowed: allowedDigits });
