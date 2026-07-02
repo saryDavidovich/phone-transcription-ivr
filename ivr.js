@@ -642,16 +642,27 @@ async function handleRecording(call, phone, customer) {
 }
 
 async function handleOptions(call, phone) {
-    // 027 - לטעינת ארנק הקש 1, לעדכון פרטים הקש 2, לחזרה הקש 0
-    const choice = await call.read([MSG(27)], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2] });
+    // 027 - לטעינת ארנק הקש 1, לעדכון פרטים הקש 2, לשמיעת מחירון הקש 3, לחזרה הקש 0
+    const choice = await call.read([MSG(27)], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
     if (choice === '1') {
         await handleTopUp(call, phone);
     } else if (choice === '2') {
         await handleUpdateDetails(call, phone);
+    } else if (choice === '3') {
+        await handlePriceList(call, phone);
     } else {
         await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
     }
+}
+
+async function handlePriceList(call, phone) {
+    // 092 - מחירון קצר, לחזרה לתפריט הראשי הקש 0
+    await call.read([
+        MSG(92)
+    ], 'tap', { max_digits: 1, digits_allowed: [0] });
+
+    await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
 }
 
 async function handleTopUp(call, phone) {
