@@ -565,7 +565,6 @@ async function handleRecording(call, phone, customer) {
             transcriptionTier === 'premium' ? MSG(59) : MSG(58),
             MSG(18),
             { type: 'text', data: priceStr },
-            MSG(19),
             { type: 'go_to_folder', data: '/' }
         ]);
         return;
