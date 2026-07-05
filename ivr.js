@@ -263,6 +263,9 @@ router.get('/', async (call) => {
         } else {
             balanceParts.push({ type: 'text', data: `${balanceShekel} שקל` });
         }
+    } else {
+        // 093 - אין לך עדיין יתרה בארנק. לטעינת ארנק הקש 2 ואז 1
+        balanceParts.push(MSG(93));
     }
 
     // בדוק הקלטות ממתינות לתשלום
@@ -281,14 +284,26 @@ router.get('/', async (call) => {
                 ];
             } else {
                 // עדיין אין יתרה מספיקה
+                const costShekel = Math.floor(pending.cost);
+                const costAgorot = Math.round((pending.cost - costShekel) * 100);
+                const costStr = costAgorot > 0
+                    ? `${costShekel} שקל ו ${costAgorot} אגורות`
+                    : `${costShekel} שקל`;
+
+                const balShekel = Math.floor(pending.balance);
+                const balAgorot = Math.round((pending.balance - balShekel) * 100);
+                const balStr = balAgorot > 0
+                    ? `${balShekel} שקל ו ${balAgorot} אגורות`
+                    : `${balShekel} שקל`;
+
                 pendingParts = [
                     MSG(77),  // נמצאה הקלטה ממתינה באורך
                     { type: 'text', data: String(pending.minutes) },
                     MSG(78),  // דקות, העלות היא
-                    { type: 'text', data: String(pending.cost) },
-                    MSG(79),  // שקל, יתרתך היא
-                    { type: 'text', data: String(pending.balance) },
-                    MSG(80),  // שקל, אנא טען ארנק כדי שהתמלול יבוצע
+                    { type: 'text', data: costStr },
+                    MSG(79),  // יתרתך היא
+                    { type: 'text', data: balStr },
+                    MSG(80),  // אנא טען ארנק כדי שהתמלול יבוצע
                 ];
             }
         }
@@ -536,13 +551,20 @@ async function handleRecording(call, phone, customer) {
         const balanceStr = balanceAgorot > 0
             ? `${balanceShekel} שקל ו ${balanceAgorot} אגורות`
             : `${balanceShekel} שקל`;
+
+        const priceShekel = Math.floor(requiredPrice);
+        const priceAgorot = Math.round((requiredPrice - priceShekel) * 100);
+        const priceStr = priceAgorot > 0
+            ? `${priceShekel} שקל ו ${priceAgorot} אגורות`
+            : `${priceShekel} שקל`;
+
         await call.id_list_message([
             MSG(16),
             { type: 'text', data: balanceStr },
             MSG(17),
             transcriptionTier === 'premium' ? MSG(59) : MSG(58),
             MSG(18),
-            { type: 'text', data: String(requiredPrice) },
+            { type: 'text', data: priceStr },
             MSG(19),
             { type: 'go_to_folder', data: '/' }
         ]);
