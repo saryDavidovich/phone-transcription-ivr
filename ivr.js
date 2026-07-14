@@ -1025,7 +1025,7 @@ async function handleAdminMenu(call) {
     const choice = await call.read([MSG(94)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
     if (choice === '2') {
-        await call.id_list_message([{ type: 'go_to_folder', data: 'ivr2:59' }]);
+        await call.id_list_message([{ type: 'go_to_folder', data: '59' }]);
         return;
     }
 
