@@ -1021,15 +1021,12 @@ async function handleQuickRecord(call, phone, customer) {
 }
 
 async function handleAdminMessages(call) {
-    // 034 - הקש את מספר ההודעה ולסיום הקש סולמית
-    const msgId = await call.read([MSG(34)], 'tap', { max_digits: 10, terminate_keys: ['#'] });
+    // 034 - הקש את מספר ההודעה ולסיום הקש סולמית, או הקש כוכבית/סולמית בלי מספר למעבר לשלוחה 59
+    const msgId = await call.read([MSG(34)], 'tap', { max_digits: 10, terminate_keys: ['#', '*'] });
 
     if (!msgId) {
-        await call.id_list_message([
-            // 035 - לא הוקש מספר, שיחה טובה
-            MSG(35),
-            { type: 'go_to_folder', data: 'hangup' }
-        ]);
+        // המנהל הקיש כוכבית או סולמית בלי להקליד מספר - ניתוב לשלוחה 59 בימות
+        await call.id_list_message([{ type: 'go_to_folder', data: '59' }]);
         return;
     }
 
