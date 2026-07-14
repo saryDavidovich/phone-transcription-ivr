@@ -1026,7 +1026,7 @@ async function handleAdminMessages(call) {
 
     if (!msgId) {
         // המנהל הקיש כוכבית או סולמית בלי להקליד מספר - ניתוב לשלוחה 59 בימות
-        await call.id_list_message([{ type: 'go_to_folder', data: '59' }]);
+        await call.id_list_message([{ type: 'go_to_folder', data: 'ivr2:59' }]);
         return;
     }
 
