@@ -5,7 +5,16 @@ const axios = require('axios');
 const app = express();
 const PYTHON_URL = process.env.PYTHON_URL || 'https://web-production-90272.up.railway.app';
 
-const router = YemotRouter({ printLog: true });
+const router = YemotRouter({
+    printLog: true,
+    // המנגנון הרשמי של הספרייה: כל שגיאה שלא טופלה בקוד שלנו (שאינה ניתוק/טיימאאוט/יציאה,
+    // שהספרייה כבר מטפלת בהן לבד) מגיעה לכאן במקום להיזרק מחדש ולהפיל את כל השרת.
+    uncaughtErrorHandler: async (error, call) => {
+        console.error(`💥 Uncaught error in call ${call?.callId || ''} (server stays alive):`, error.message);
+        // בכוונה לא עושים פה שום פעולה נוספת על call - היא עלולה להיות כבר לא תקינה
+        // (לדוגמה response שכבר נשלח), וכל ניסיון נוסף עלול לזרוק שגיאה חדשה.
+    }
+});
 
 // בודק אם שגיאה נגרמה מכך שהמתקשר ניתק את השיחה.
 // במקרה כזה אסור לנסות לשלוח/לקרוא עוד דבר דרך call - החיבור כבר לא קיים.
@@ -117,7 +126,8 @@ async function getEmailByKeypad(call) {
     return await getDomainAndConfirmEmail(call, localPart, 'כתיבה');
 }
 
-async function getEmailByVoice(call) {
+async function getEmailByVoice(call, attempt = 1) {
+    const MAX_ATTEMPTS = 3;
     // 048 - הקליט את שם המייל שלך עד השטרודל לאחר הצליל, ולסיום הקש סולמית, שים לב ייתכן והזיהוי לא יהיה מדויק
     const recPath = await call.read([MSG(48)], 'record', {
         no_confirm_menu: true,
@@ -135,9 +145,14 @@ async function getEmailByVoice(call) {
         const localPart = res.data.local_part || '';
 
         if (!localPart) {
+            if (attempt >= MAX_ATTEMPTS) {
+                // אחרי כמה נסיונות כושלים - לא משאירים את המתקשר תקוע בלופ, עוברים למצב הקלדה
+                await call.id_list_message([MSG(50)], { prependToNextAction: true });
+                return await getEmailByKeypad(call);
+            }
             // 049 - לא הצלחנו לזהות את שם המייל, נסו שוב
             await call.id_list_message([MSG(49)], { prependToNextAction: true });
-            return await getEmailByVoice(call);
+            return await getEmailByVoice(call, attempt + 1);
         }
 
         return await getDomainAndConfirmEmail(call, localPart, 'הקלטה');
@@ -154,7 +169,8 @@ async function getEmailByVoice(call) {
     }
 }
 
-async function getDomainByVoice(call) {
+async function getDomainByVoice(call, attempt = 1) {
+    const MAX_ATTEMPTS = 3;
     // 051 - הקליט את סיומת המייל לאחר הצליל ולסיום הקש סולמית, לדוגמה הקליט יאהו נקודה קום
     const recPath = await call.read([MSG(51)], 'record', {
         no_confirm_menu: true,
@@ -172,9 +188,16 @@ async function getDomainByVoice(call) {
         const domain = res.data.local_part || '';
 
         if (!domain) {
+            if (attempt >= MAX_ATTEMPTS) {
+                // אחרי כמה נסיונות כושלים - עוברים להקלדת הסיומת במקלדת במקום להשאיר תקוע בלופ
+                await call.id_list_message([MSG(50)], { prependToNextAction: true });
+                // 056 - הקלד את הסיומת ולסיום הקש סולמית
+                const domainPart = await call.read([MSG(56)], 'tap', { max_digits: 50, terminate_keys: ['#'] });
+                return decodeEmail(domainPart);
+            }
             // 052 - לא הצלחנו לזהות את הסיומת, נסו שוב
             await call.id_list_message([MSG(52)], { prependToNextAction: true });
-            return await getDomainByVoice(call);
+            return await getDomainByVoice(call, attempt + 1);
         }
 
         const domainSpoken = speakEmail('@' + domain).replace('שטרודל ', '');
@@ -186,7 +209,12 @@ async function getDomainByVoice(call) {
         ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
         if (confirm === '1') return domain;
-        return await getDomainByVoice(call);
+        if (attempt >= MAX_ATTEMPTS) {
+            await call.id_list_message([MSG(50)], { prependToNextAction: true });
+            const domainPart = await call.read([MSG(56)], 'tap', { max_digits: 50, terminate_keys: ['#'] });
+            return decodeEmail(domainPart);
+        }
+        return await getDomainByVoice(call, attempt + 1);
 
     } catch (e) {
         if (isHangup(e)) {
@@ -194,7 +222,12 @@ async function getDomainByVoice(call) {
             return;
         }
         console.error('extract domain error:', e.message);
-        return await getDomainByVoice(call);
+        if (attempt >= MAX_ATTEMPTS) {
+            await call.id_list_message([MSG(50)], { prependToNextAction: true });
+            const domainPart = await call.read([MSG(56)], 'tap', { max_digits: 50, terminate_keys: ['#'] });
+            return decodeEmail(domainPart);
+        }
+        return await getDomainByVoice(call, attempt + 1);
     }
 }
 
