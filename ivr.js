@@ -392,7 +392,7 @@ router.get('/', async (call) => {
     } else if (choice === '9') {
         await handleManagerMessage(call, phone, customer);
     } else if (choice === '0' && phone === ADMIN_PHONE) {
-        await handleAdminMessages(call);
+        await handleAdminMenu(call);
     } else {
         await handleOptions(call, phone);
     }
@@ -1020,13 +1020,28 @@ async function handleQuickRecord(call, phone, customer) {
     await call.id_list_message([MSG(26), { type: 'go_to_folder', data: '/' }]);
 }
 
+async function handleAdminMenu(call) {
+    // 094 - לשמיעת הודעות הקש 1, למעבר לשלוחה 59 הקש 2
+    const choice = await call.read([MSG(94)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+
+    if (choice === '2') {
+        await call.id_list_message([{ type: 'go_to_folder', data: 'ivr2:59' }]);
+        return;
+    }
+
+    await handleAdminMessages(call);
+}
+
 async function handleAdminMessages(call) {
-    // 034 - הקש את מספר ההודעה ולסיום הקש סולמית, או הקש כוכבית/סולמית בלי מספר למעבר לשלוחה 59
-    const msgId = await call.read([MSG(34)], 'tap', { max_digits: 10, terminate_keys: ['#', '*'] });
+    // 034 - הקש את מספר ההודעה ולסיום הקש סולמית
+    const msgId = await call.read([MSG(34)], 'tap', { max_digits: 10, terminate_keys: ['#'] });
 
     if (!msgId) {
-        // המנהל הקיש כוכבית או סולמית בלי להקליד מספר - ניתוב לשלוחה 59 בימות
-        await call.id_list_message([{ type: 'go_to_folder', data: 'ivr2:59' }]);
+        await call.id_list_message([
+            // 035 - לא הוקש מספר, שיחה טובה
+            MSG(35),
+            { type: 'go_to_folder', data: 'hangup' }
+        ]);
         return;
     }
 
