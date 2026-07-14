@@ -1,11 +1,23 @@
 const express = require('express');
-const { YemotRouter } = require('yemot-router2');
+const { YemotRouter, HangupError } = require('yemot-router2');
 const axios = require('axios');
 
 const app = express();
 const PYTHON_URL = process.env.PYTHON_URL || 'https://web-production-90272.up.railway.app';
 
 const router = YemotRouter({ printLog: true });
+
+// בודק אם שגיאה נגרמה מכך שהמתקשר ניתק את השיחה.
+// במקרה כזה אסור לנסות לשלוח/לקרוא עוד דבר דרך call - החיבור כבר לא קיים.
+function isHangup(e) {
+    return e instanceof HangupError || e?.name === 'HangupError' || /hangup/i.test(e?.message || '');
+}
+
+// רשת ביטחון: שגיאה לא-תפוסה לא תפיל יותר את כל השרת (רק תירשם ללוג).
+// זה לא פותר את הבאג המקורי, אבל מונע ממנו להשבית את השירות לכל שאר המתקשרים.
+process.on('uncaughtException', (err) => {
+    console.error('💥 Uncaught exception (server stays alive):', err.message);
+});
 
 // נתיב תיקיית הודעות מערכת בימות
 const MSG = (n) => ({ type: 'file', data: `/הודעות מערכת/${String(n).padStart(3,'0')}/000` });
@@ -131,6 +143,10 @@ async function getEmailByVoice(call) {
         return await getDomainAndConfirmEmail(call, localPart, 'הקלטה');
 
     } catch (e) {
+        if (isHangup(e)) {
+            console.log('getEmailByVoice: call hangup, aborting flow');
+            return; // השיחה נגמרה - אסור לנסות לשלוח/לקרוא עוד דבר
+        }
         console.error('extract email error:', e.message);
         // 050 - אירעה שגיאה, עוברים למצב כתיבה
         await call.id_list_message([MSG(50)], { prependToNextAction: true });
@@ -173,6 +189,10 @@ async function getDomainByVoice(call) {
         return await getDomainByVoice(call);
 
     } catch (e) {
+        if (isHangup(e)) {
+            console.log('getDomainByVoice: call hangup, aborting flow');
+            return;
+        }
         console.error('extract domain error:', e.message);
         return await getDomainByVoice(call);
     }
@@ -246,6 +266,10 @@ router.get('/', async (call) => {
             return;
         }
     } catch (e) {
+        if (isHangup(e)) {
+            console.log('router /: call hangup, aborting flow');
+            return;
+        }
         console.error('customer error:', e.message);
     }
 
@@ -364,6 +388,10 @@ async function handleEmailInstructions(call, phone, customer) {
                     { type: 'go_to_folder', data: '/' }
                 ]);
             } catch (e) {
+                if (isHangup(e)) {
+                    console.log('handleEmailInstructions: call hangup, aborting flow');
+                    return;
+                }
                 console.error('send-email-instructions error:', e.message);
                 await call.id_list_message([
                     // 039 - אירעה שגיאה בשליחת ההוראות, שיחה טובה
@@ -407,6 +435,10 @@ async function handleHandwritingInstructions(call, phone, customer) {
                     { type: 'go_to_folder', data: '/' }
                 ]);
             } catch (e) {
+                if (isHangup(e)) {
+                    console.log('handleHandwritingInstructions: call hangup, aborting flow');
+                    return;
+                }
                 console.error('send-handwriting-instructions error:', e.message);
                 await call.id_list_message([
                     // 039 - אירעה שגיאה בשליחת ההוראות, שיחה טובה
@@ -861,6 +893,10 @@ async function handleDefaultSettings(call, phone, customer) {
         await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, default_settings: newDefaults });
         await call.id_list_message([MSG(87)], { prependToNextAction: true }); // ברירת המחדל עודכנה
     } catch (e) {
+        if (isHangup(e)) {
+            console.log('handleDefaultSettings: call hangup, aborting flow');
+            return;
+        }
         console.error('update default settings error:', e.message);
     }
 
@@ -969,14 +1005,16 @@ async function handleAdminMessages(call) {
             { type: 'file', data: `manager_messages/${msgId}` }
         ], { prependToNextAction: true });
     } catch (e) {
-        console.error('admin messages error:', e.message);
-        if (!e.message.includes('hangup')) {
-            await call.id_list_message([
-                // 036 - שגיאה בטעינת ההודעה, שיחה טובה
-                MSG(36),
-                { type: 'go_to_folder', data: '/' }
-            ]);
+        if (isHangup(e)) {
+            console.log('handleAdminMessages: call hangup, aborting flow');
+            return;
         }
+        console.error('admin messages error:', e.message);
+        await call.id_list_message([
+            // 036 - שגיאה בטעינת ההודעה, שיחה טובה
+            MSG(36),
+            { type: 'go_to_folder', data: '/' }
+        ]);
         return;
     }
 
