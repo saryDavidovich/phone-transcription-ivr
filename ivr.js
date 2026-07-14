@@ -160,7 +160,7 @@ async function getEmailByVoice(call, attempt = 1) {
     } catch (e) {
         if (isHangup(e)) {
             console.log('getEmailByVoice: call hangup, aborting flow');
-            return; // השיחה נגמרה - אסור לנסות לשלוח/לקרוא עוד דבר
+            throw e; // מעבירים את השגיאה הלאה - שהיא תגיע ל-uncaughtErrorHandler/HangupError handler של הספרייה
         }
         console.error('extract email error:', e.message);
         // 050 - אירעה שגיאה, עוברים למצב כתיבה
@@ -219,7 +219,7 @@ async function getDomainByVoice(call, attempt = 1) {
     } catch (e) {
         if (isHangup(e)) {
             console.log('getDomainByVoice: call hangup, aborting flow');
-            return;
+            throw e; // מעבירים את השגיאה הלאה - שהיא תגיע ל-uncaughtErrorHandler/HangupError handler של הספרייה
         }
         console.error('extract domain error:', e.message);
         if (attempt >= MAX_ATTEMPTS) {
@@ -301,7 +301,7 @@ router.get('/', async (call) => {
     } catch (e) {
         if (isHangup(e)) {
             console.log('router /: call hangup, aborting flow');
-            return;
+            throw e; // מעבירים את השגיאה הלאה - שהיא תגיע ל-uncaughtErrorHandler/HangupError handler של הספרייה
         }
         console.error('customer error:', e.message);
     }
@@ -423,7 +423,7 @@ async function handleEmailInstructions(call, phone, customer) {
             } catch (e) {
                 if (isHangup(e)) {
                     console.log('handleEmailInstructions: call hangup, aborting flow');
-                    return;
+                    throw e; // מעבירים את השגיאה הלאה - שהיא תגיע ל-uncaughtErrorHandler/HangupError handler של הספרייה
                 }
                 console.error('send-email-instructions error:', e.message);
                 await call.id_list_message([
@@ -470,7 +470,7 @@ async function handleHandwritingInstructions(call, phone, customer) {
             } catch (e) {
                 if (isHangup(e)) {
                     console.log('handleHandwritingInstructions: call hangup, aborting flow');
-                    return;
+                    throw e; // מעבירים את השגיאה הלאה - שהיא תגיע ל-uncaughtErrorHandler/HangupError handler של הספרייה
                 }
                 console.error('send-handwriting-instructions error:', e.message);
                 await call.id_list_message([
@@ -928,7 +928,7 @@ async function handleDefaultSettings(call, phone, customer) {
     } catch (e) {
         if (isHangup(e)) {
             console.log('handleDefaultSettings: call hangup, aborting flow');
-            return;
+            throw e; // מעבירים את השגיאה הלאה - שהיא תגיע ל-uncaughtErrorHandler/HangupError handler של הספרייה
         }
         console.error('update default settings error:', e.message);
     }
@@ -1040,7 +1040,7 @@ async function handleAdminMessages(call) {
     } catch (e) {
         if (isHangup(e)) {
             console.log('handleAdminMessages: call hangup, aborting flow');
-            return;
+            throw e; // מעבירים את השגיאה הלאה - שהיא תגיע ל-uncaughtErrorHandler/HangupError handler של הספרייה
         }
         console.error('admin messages error:', e.message);
         await call.id_list_message([
