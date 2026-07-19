@@ -22,6 +22,22 @@ function isHangup(e) {
     return e instanceof HangupError || e?.name === 'HangupError' || /hangup/i.test(e?.message || '');
 }
 
+// רישום כל שיחה ל-DB של הממשק הראשי (לצורך דוח שיחות לפי תאריכים) -
+// דרך מנגנון ה-Events הרשמי של הספרייה, כדי לא להצטרך לגעת בכל handler בנפרד.
+// כשל בקריאה (רשת/שרת פייתון לא זמין) לא אמור לפגוע בשיחה עצמה - .catch שקט.
+router.events.on('new_call', (call) => {
+    axios.post(`${PYTHON_URL}/api/call/start`, {
+        call_id: call.ApiCallId,
+        phone: call.ApiPhone
+    }).catch(() => {});
+});
+
+router.events.on('call_hangup', (call) => {
+    axios.post(`${PYTHON_URL}/api/call/end`, {
+        call_id: call.ApiCallId
+    }).catch(() => {});
+});
+
 // רשת ביטחון: שגיאה לא-תפוסה לא תפיל יותר את כל השרת (רק תירשם ללוג).
 // זה לא פותר את הבאג המקורי, אבל מונע ממנו להשבית את השירות לכל שאר המתקשרים.
 process.on('uncaughtException', (err) => {
