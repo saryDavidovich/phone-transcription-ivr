@@ -22,22 +22,6 @@ function isHangup(e) {
     return e instanceof HangupError || e?.name === 'HangupError' || /hangup/i.test(e?.message || '');
 }
 
-// רישום כל שיחה ל-DB של הממשק הראשי (לצורך דוח שיחות לפי תאריכים) -
-// דרך מנגנון ה-Events הרשמי של הספרייה, כדי לא להצטרך לגעת בכל handler בנפרד.
-// כשל בקריאה (רשת/שרת פייתון לא זמין) לא אמור לפגוע בשיחה עצמה - .catch שקט.
-router.events.on('new_call', (call) => {
-    axios.post(`${PYTHON_URL}/api/call/start`, {
-        call_id: call.ApiCallId,
-        phone: call.ApiPhone
-    }).catch(() => {});
-});
-
-router.events.on('call_hangup', (call) => {
-    axios.post(`${PYTHON_URL}/api/call/end`, {
-        call_id: call.ApiCallId
-    }).catch(() => {});
-});
-
 // רשת ביטחון: שגיאה לא-תפוסה לא תפיל יותר את כל השרת (רק תירשם ללוג).
 // זה לא פותר את הבאג המקורי, אבל מונע ממנו להשבית את השירות לכל שאר המתקשרים.
 process.on('uncaughtException', (err) => {
@@ -509,25 +493,33 @@ async function handleHandwritingInstructions(call, phone, customer) {
 }
 
 async function handleManagerMessage(call, phone, customer) {
-    let msgId = call.ApiCallId;
-    try {
-        const idRes = await axios.post(`${PYTHON_URL}/api/manager-message-reserve`, {
-            phone,
-            call_id: call.ApiCallId
-        });
-        msgId = idRes.data.id;
-    } catch (e) {
-        console.error('reserve error:', e.message);
-    }
-
     // 009 - קובץ ריק — הודעה זמנית לפני הודעה למנהל
     // 010 - השאר הודעתך למנהל לאחר הצליל, לסיום הקש סולמית
-    const recPath = await call.read([MSG(9), MSG(10)], 'record', {
-        no_confirm_menu: true,
-        save_on_hangup: true,
-        path: '/manager_messages',
-        file_name: String(msgId)
-    });
+    // שימו לב: אין כאן שריון/יצירת רשומה מראש - אם הלקוח מנתק באמצע ההקלטה
+    // בלי להקיש סולמית (save_on_hangup: false), לא נשמר כלום ולא נוצרת הודעה
+    // בממשק הניהול. הודעה נוצרת אך ורק לאחר הקלטה שהושלמה בהקשת סולמית.
+    let recPath;
+    try {
+        recPath = await call.read([MSG(9), MSG(10)], 'record', {
+            no_confirm_menu: true,
+            save_on_hangup: false,
+            path: '/manager_messages',
+            file_name: String(call.ApiCallId)
+        });
+    } catch (e) {
+        if (isHangup(e)) {
+            console.log('handleManagerMessage: hangup before recording finished, not saving');
+            throw e; // מעבירים הלאה - שהספרייה תטפל בניתוק כרגיל
+        }
+        throw e;
+    }
+
+    if (!recPath) {
+        // הקיש סולמית מיד בלי להקליט כלום - גם כאן לא שומרים הודעה ריקה
+        console.log('handleManagerMessage: empty recording, not saving');
+        await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
+        return;
+    }
 
     console.log('manager recPath:', recPath);
 
