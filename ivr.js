@@ -493,18 +493,31 @@ async function handleHandwritingInstructions(call, phone, customer) {
 }
 
 async function handleManagerMessage(call, phone, customer) {
+    // משריינים מראש ID קצר ורציף (כמו שהיה במקור) - כדי שהמספר שמופיע בשלוחת
+    // ההאזנה בימות יתאים בדיוק למספר שמוצג לכל הודעה בממשק הניהול. ה"הגנה"
+    // מפני הודעות ריקות לא נעשית יותר ע"י מניעת שריון (זה שבר את המספור),
+    // אלא ע"י סינון בתצוגת הממשק: הודעות בלי rec_url (כלומר לא הוקלט בפועל
+    // עד הסוף) פשוט לא מוצגות ברשימה, גם אם קיימת להן רשומה שקטה ב-DB.
+    let msgId = call.ApiCallId;
+    try {
+        const idRes = await axios.post(`${PYTHON_URL}/api/manager-message-reserve`, {
+            phone,
+            call_id: call.ApiCallId
+        });
+        msgId = idRes.data.id;
+    } catch (e) {
+        console.error('reserve error:', e.message);
+    }
+
     // 009 - קובץ ריק — הודעה זמנית לפני הודעה למנהל
     // 010 - השאר הודעתך למנהל לאחר הצליל, לסיום הקש סולמית
-    // שימו לב: אין כאן שריון/יצירת רשומה מראש - אם הלקוח מנתק באמצע ההקלטה
-    // בלי להקיש סולמית (save_on_hangup: false), לא נשמר כלום ולא נוצרת הודעה
-    // בממשק הניהול. הודעה נוצרת אך ורק לאחר הקלטה שהושלמה בהקשת סולמית.
     let recPath;
     try {
         recPath = await call.read([MSG(9), MSG(10)], 'record', {
             no_confirm_menu: true,
             save_on_hangup: false,
             path: '/manager_messages',
-            file_name: String(call.ApiCallId)
+            file_name: String(msgId)
         });
     } catch (e) {
         if (isHangup(e)) {
@@ -515,7 +528,8 @@ async function handleManagerMessage(call, phone, customer) {
     }
 
     if (!recPath) {
-        // הקיש סולמית מיד בלי להקליט כלום - גם כאן לא שומרים הודעה ריקה
+        // הקיש סולמית מיד בלי להקליט כלום - גם כאן לא שומרים תוכן, הרשומה
+        // המשוריינת תישאר בלי rec_url ולכן לא תוצג בממשק (ראו admin.py)
         console.log('handleManagerMessage: empty recording, not saving');
         await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
         return;
