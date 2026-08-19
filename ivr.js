@@ -276,8 +276,13 @@ async function getEmail(call) {
 }
 
 router.get('/', async (call) => {
-    const phone = call.ApiPhone;
+    await presentMainMenu(call, call.ApiPhone);
+});
 
+// תפריט ראשי - מופרד מ-router.get('/') כדי שאפשר יהיה להגיע אליו גם משלוחה 7
+// (זיהוי תלמיד לפי מספר תלמיד), עם הטלפון האמיתי שהתלמיד רשום תחתיו ב-DB
+// ולא הטלפון שממנו הוא בפועל מתקשר.
+async function presentMainMenu(call, phone) {
     let customer = null;
     try {
         const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
@@ -369,14 +374,15 @@ router.get('/', async (call) => {
     }
 
     const ADMIN_PHONE = '0527134491';
-    const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 4, 5, 6, 9] : [1, 2, 3, 4, 5, 6, 9];
+    // 7 — כניסה לפי מספר תלמיד (ראה handleStudentLogin), פתוח לכל מתקשר
+    const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 4, 5, 6, 7, 9] : [1, 2, 3, 4, 5, 6, 7, 9];
 
     const choice = await call.read([
         ...pendingParts,  // הודעת הקלטה ממתינה לתשלום — נשמעת ראשונה, לפני הברכה
         MSG(1),   // 001 - שלום, ברוכים הבאים למערכת התמלול
         MSG(2),   // 002 - קובץ ריק — הודעה זמנית לכניסה
         ...balanceParts,
-        MSG(4),   // 004 - תפריט ראשי: הקש 1... הקש 9
+        MSG(4),   // 004 - תפריט ראשי: הקש 1... הקש 9 (יש לעדכן בימות שגם הקש 7 קיים - כניסה עם מספר תלמיד)
     ], 'tap', { max_digits: 1, digits_allowed: allowedDigits });
 
     if (choice === '1') {
@@ -389,6 +395,8 @@ router.get('/', async (call) => {
         await handleEmailInstructions(call, phone, customer);
     } else if (choice === '6') {
         await handleHandwritingInstructions(call, phone, customer);
+    } else if (choice === '7') {
+        await handleStudentLogin(call);
     } else if (choice === '9') {
         await handleManagerMessage(call, phone, customer);
     } else if (choice === '0' && phone === ADMIN_PHONE) {
@@ -396,7 +404,47 @@ router.get('/', async (call) => {
     } else {
         await handleOptions(call, phone);
     }
-});
+}
+
+async function handleStudentLogin(call, attempt = 1) {
+    const MAX_ATTEMPTS = 3;
+
+    // 095 - הקש את מספר התלמיד שלך ולאחר מכן הקש סולמית (הודעה חדשה - יש להקליט בימות)
+    const code = await call.read([MSG(95)], 'tap', { max_digits: 10, terminate_keys: ['#'] });
+
+    if (!code) {
+        await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
+        return;
+    }
+
+    let resolvedPhone = null;
+    try {
+        const res = await axios.get(`${PYTHON_URL}/api/customer/by-student/${code}`);
+        resolvedPhone = res.data.phone;
+    } catch (e) {
+        if (isHangup(e)) {
+            console.log('handleStudentLogin: call hangup, aborting flow');
+            throw e; // מעבירים את השגיאה הלאה - שהיא תגיע ל-uncaughtErrorHandler/HangupError handler של הספרייה
+        }
+        console.error('by-student lookup error:', e.response ? e.response.data : e.message);
+    }
+
+    if (!resolvedPhone) {
+        if (attempt >= MAX_ATTEMPTS) {
+            // 096 - מספר תלמיד לא נמצא, או שהשימוש אינו מותר כרגע (מחוץ לשעות שהמוסד הגדיר).
+            // אחרי כמה נסיונות כושלים - לא משאירים את המתקשר תקוע בלופ, חוזרים לתפריט הראשי.
+            await call.id_list_message([MSG(96), { type: 'go_to_folder', data: '/' }]);
+            return;
+        }
+        // 096 - מספר תלמיד לא נמצא, או שהשימוש אינו מותר כרגע. נסה שוב
+        await call.id_list_message([MSG(96)], { prependToNextAction: true });
+        return await handleStudentLogin(call, attempt + 1);
+    }
+
+    // זוהה בהצלחה - ממשיכים בדיוק כמו כל לקוח אחר (יתרה, הקלטה, אפשרויות וכו'),
+    // רק עם הטלפון האמיתי של התלמיד ולא הטלפון שממנו הוא בפועל מתקשר.
+    await presentMainMenu(call, resolvedPhone);
+}
 
 async function handleEmailInstructions(call, phone, customer) {
     const hasEmail = !!(customer && customer.email);
