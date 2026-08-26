@@ -68,17 +68,112 @@ function buildDataUriDownloadPage(filename, mimetype, b64) {
 </html>`;
 }
 
-async function fetchRecordingBytesForDownload(url, callId) {
+// מפענח כותרת WAV (RIFF/WAVE) ומחזיר { declaredDataBytes, byteRate } או
+// null אם זה לא נראה כמו WAV תקין. משמש גם לבדיקת "נקטע באמצע השליחה"
+// (declaredDataBytes > מה שבאמת קיבלנו) וגם לחישוב האורך בפועל בשניות.
+function parseWavHeader(buf) {
+    try {
+        if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') {
+            return null;
+        }
+        let pos = 12;
+        let byteRate = null;
+        while (pos + 8 <= buf.length) {
+            const chunkId = buf.toString('ascii', pos, pos + 4);
+            const chunkSize = buf.readUInt32LE(pos + 4);
+            if (chunkId === 'fmt ' && pos + 8 + 16 <= buf.length) {
+                byteRate = buf.readUInt32LE(pos + 8 + 8); // בתים/שנייה - offset 8 בתוך ה-fmt chunk
+            }
+            if (chunkId === 'data') {
+                return { declaredDataBytes: chunkSize, dataStart: pos + 8, byteRate };
+            }
+            pos += 8 + chunkSize + (chunkSize % 2);
+        }
+    } catch (e) {
+        return null;
+    }
+    return null;
+}
+
+// בודק אם קובץ ה-WAV חסר בייטים ביחס למה שהכותרת שלו מצהירה - סימן ל"נחתך
+// באמצע השליחה" (אותה בדיקה בדיוק כמו _wav_looks_truncated בפייתון).
+function wavLooksTruncated(buf) {
+    const h = parseWavHeader(buf);
+    if (!h) return false;
+    const declaredEnd = h.dataStart + h.declaredDataBytes;
+    return declaredEnd > buf.length + 1024; // 1KB סלאק ל-padding
+}
+
+// מחשב את אורך ההקלטה בפועל בשניות, לפי בתים שבאמת קיימים ב-data chunk
+// (לא לפי מה שהכותרת מצהירה - כדי לתפוס גם מקרה שהכותרת "משקרת" בעצמה).
+function wavActualDurationSeconds(buf) {
+    const h = parseWavHeader(buf);
+    if (!h || !h.byteRate) return null;
+    const actualDataBytes = Math.min(h.declaredDataBytes, buf.length - h.dataStart);
+    if (actualDataBytes <= 0) return null;
+    return actualDataBytes / h.byteRate;
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// מנסה להביא הקלטה מכתובת נתונה, עם עד 3 ניסיונות (עם המתנה גוברת בין
+// ניסיון לניסיון) אם הקובץ שחוזר נראה בעייתי - או "נחתך באמצע" (WAV עם
+// data chunk שגדול ממה שבאמת קיבלנו), או קצר משמעותית מהאורך האמיתי של
+// השיחה (expectedDurationSeconds, אם ידוע - מגיע מ-Recording.duration_seconds
+// בפייתון). הבדיקה השנייה קיימת כי עלה חשד (מהמשתמש) שימות המשיח עצמם
+// לא תמיד מספיקים "לסיים לכתוב" את קובץ ההקלטה באותו הרגע שבו כבר אפשר
+// לבקש אותו - אז ממתינים קצת ומנסים שוב במקום לוותר על ה-4 השניות הראשונות
+// בלבד. מחזיר { buf, mimetype } עם התוצאה הכי טובה שהתקבלה (גם אם עדיין
+// לא מושלמת - עדיף להחזיר קובץ חלקי מאשר שגיאה גמורה), או null אם שום
+// ניסיון לא החזיר כלום.
+async function fetchOnceWithRetries(url, expectedDurationSeconds, label) {
+    const MAX_ATTEMPTS = 3;
+    const DELAYS_MS = [0, 2000, 4000];
+    let best = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        if (DELAYS_MS[attempt - 1]) await sleep(DELAYS_MS[attempt - 1]);
+        let r;
+        try {
+            r = await axios.get(url, { responseType: 'arraybuffer', timeout: 120000 });
+        } catch (e) {
+            console.error(`fetchOnceWithRetries [${label}] attempt ${attempt}: request failed:`, e.message);
+            continue;
+        }
+        const buf = Buffer.from(r.data);
+        const mimetype = r.headers['content-type'] || 'audio/wav';
+        const declaredLen = r.headers['content-length'];
+        const truncated = wavLooksTruncated(buf);
+        const actualDuration = wavActualDurationSeconds(buf);
+        const shortOfExpected = expectedDurationSeconds &&
+            actualDuration != null && actualDuration < expectedDurationSeconds - 2;
+
+        console.log(`fetchOnceWithRetries [${label}] attempt ${attempt}: declared Content-Length=` +
+            `${declaredLen}, actual received=${buf.length} bytes, wav duration=${actualDuration}s, ` +
+            `expected duration=${expectedDurationSeconds}s, looks_truncated=${truncated}, ` +
+            `short_of_expected=${shortOfExpected}`);
+
+        if (!best || buf.length > best.buf.length) {
+            best = { buf, mimetype };
+        }
+        if (!truncated && !shortOfExpected) {
+            return { buf, mimetype }; // הכי טוב שאפשר - קובץ תקין ובאורך המצופה
+        }
+        // אחרת ממשיכים לניסיון הבא (עם המתנה) - אולי ימות עדיין לא סיימו
+        // לכתוב את הקובץ, או שהחיבור נחתך באופן חד-פעמי.
+    }
+    return best; // אף ניסיון לא היה מושלם - מחזירים את הכי טוב שהיה (או null)
+}
+
+async function fetchRecordingBytesForDownload(url, callId, expectedDurationSeconds) {
     // ניסיון ראשון: הכתובת שהתקבלה מהפייתון (rec.rec_url) - אותה כתובת
     // שהוכח בצד הפייתון (routes/recording_proxy.py) שמביאה תמיד את כל
-    // הבייטים בשלמותם (הבעיה שם היא רק בשליחה החוצה ללקוח, לא בשליפה הזו).
+    // הבייטים בשלמותם (הבעיה שם הייתה בשליחה החוצה ללקוח, לא בשליפה הזו -
+    // אבל כאן, בצד הנוד, זו שליפה חדשה משלו, אז כן שווה לוודא).
     if (url) {
-        try {
-            const r = await axios.get(url, { responseType: 'arraybuffer', timeout: 120000 });
-            return { buf: Buffer.from(r.data), mimetype: r.headers['content-type'] || 'audio/wav' };
-        } catch (e) {
-            console.error('fetchRecordingBytesForDownload: primary url failed:', e.message);
-        }
+        const result = await fetchOnceWithRetries(url, expectedDurationSeconds, 'primary-url');
+        if (result) return result;
     }
     // גיבוי: בניית כתובת DownloadFile עצמאית עם הטוקן של ימות, בדיוק כמו
     // הגיבוי המקביל בצד הפייתון (ובדיוק כמו שאר הקוד בקובץ הזה משתמש ב-
@@ -86,12 +181,8 @@ async function fetchRecordingBytesForDownload(url, callId) {
     if (callId && YEMOT_TOKEN) {
         const fallbackUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${YEMOT_TOKEN}` +
             `&path=ivr2:/recordings/${callId}.wav`;
-        try {
-            const r = await axios.get(fallbackUrl, { responseType: 'arraybuffer', timeout: 120000 });
-            return { buf: Buffer.from(r.data), mimetype: r.headers['content-type'] || 'audio/wav' };
-        } catch (e) {
-            console.error('fetchRecordingBytesForDownload: fallback url failed:', e.message);
-        }
+        const result = await fetchOnceWithRetries(fallbackUrl, expectedDurationSeconds, 'fallback-url');
+        if (result) return result;
     }
     return null;
 }
@@ -113,11 +204,11 @@ async function fetchRecordingBytesForDownload(url, callId) {
 // buffering מלא - זה השינוי הארכיטקטוני שנועד לעקוף את הבעיה.
 app.post('/internal/download-page', async (req, res) => {
     if (!checkInternalSecret(req, res)) return;
-    const { url, filename, call_id: callId } = req.body || {};
+    const { url, filename, call_id: callId, expected_duration_seconds: expectedDurationSeconds } = req.body || {};
     if (!url && !callId) {
         return res.status(400).json({ error: 'missing url or call_id' });
     }
-    const fetched = await fetchRecordingBytesForDownload(url, callId);
+    const fetched = await fetchRecordingBytesForDownload(url, callId, expectedDurationSeconds);
     if (!fetched) {
         return res.status(502).json({ error: 'upstream fetch failed' });
     }
