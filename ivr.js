@@ -1,9 +1,131 @@
 const express = require('express');
+const crypto = require('crypto');
 const { YemotRouter, HangupError } = require('yemot-router2');
 const axios = require('axios');
 
 const app = express();
+// נדרש רק עבור נקודת הקצה הפנימית /internal/download-page (JSON body) -
+// לא אמור להשפיע על נתיבי ה-Yemot עצמם, שהם GET בלי body.
+app.use(express.json({ limit: '2mb' }));
+
 const PYTHON_URL = process.env.PYTHON_URL || 'https://web-production-90272.up.railway.app';
+
+// --- proxy שקוף להורדת הקלטות דרך הפייתון - ראו הסבר מפורט מעל
+// app.post('/internal/download-page', ...) למטה, ו"עדכון 5" ב-
+// routes/recording_proxy.py בפרויקט הפייתון (phone-transcription). ---
+const INTERNAL_PROXY_SECRET = process.env.INTERNAL_PROXY_SECRET || '';
+const YEMOT_TOKEN = process.env.YEMOT_TOKEN || '';
+
+function checkInternalSecret(req, res) {
+    const provided = req.get('X-Internal-Secret') || '';
+    const expected = INTERNAL_PROXY_SECRET;
+    const ok = !!expected && provided.length === expected.length &&
+        crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+    if (!ok) {
+        res.status(403).json({ error: 'forbidden' });
+        return false;
+    }
+    return true;
+}
+
+function escapeHtmlForDownloadPage(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+}
+
+function buildDataUriDownloadPage(filename, mimetype, b64) {
+    const safeTitle = 'ההקלטה מוכנה להורדה';
+    const safeFilename = escapeHtmlForDownloadPage(filename);
+    return `<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${safeTitle}</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; background:#f8fafc; display:flex;
+         align-items:center; justify-content:center; min-height:100vh; margin:0; }
+  .card { background:#fff; border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,.08);
+          padding:32px 28px; text-align:center; max-width:420px; }
+  h2 { color:#1d4ed8; margin:0 0 8px; }
+  p { color:#6b7280; margin:0 0 20px; word-break:break-word; }
+  a.btn { display:inline-block; background:#ea580c; color:#fff; font-weight:700;
+          padding:12px 28px; border-radius:8px; text-decoration:none; font-size:16px; }
+  a.btn:hover { background:#c2410c; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>${safeTitle}</h2>
+  <p>${safeFilename}</p>
+  <a id="dl" class="btn" href="data:${mimetype};base64,${b64}" download="${safeFilename}">⬇️ להורדה לחצו כאן</a>
+</div>
+<script>
+  document.getElementById('dl').click();
+</script>
+</body>
+</html>`;
+}
+
+async function fetchRecordingBytesForDownload(url, callId) {
+    // ניסיון ראשון: הכתובת שהתקבלה מהפייתון (rec.rec_url) - אותה כתובת
+    // שהוכח בצד הפייתון (routes/recording_proxy.py) שמביאה תמיד את כל
+    // הבייטים בשלמותם (הבעיה שם היא רק בשליחה החוצה ללקוח, לא בשליפה הזו).
+    if (url) {
+        try {
+            const r = await axios.get(url, { responseType: 'arraybuffer', timeout: 120000 });
+            return { buf: Buffer.from(r.data), mimetype: r.headers['content-type'] || 'audio/wav' };
+        } catch (e) {
+            console.error('fetchRecordingBytesForDownload: primary url failed:', e.message);
+        }
+    }
+    // גיבוי: בניית כתובת DownloadFile עצמאית עם הטוקן של ימות, בדיוק כמו
+    // הגיבוי המקביל בצד הפייתון (ובדיוק כמו שאר הקוד בקובץ הזה משתמש ב-
+    // YEMOT_TOKEN, ראו למשל getEmailByVoice למעלה).
+    if (callId && YEMOT_TOKEN) {
+        const fallbackUrl = `https://www.call2all.co.il/ym/api/DownloadFile?token=${YEMOT_TOKEN}` +
+            `&path=ivr2:/recordings/${callId}.wav`;
+        try {
+            const r = await axios.get(fallbackUrl, { responseType: 'arraybuffer', timeout: 120000 });
+            return { buf: Buffer.from(r.data), mimetype: r.headers['content-type'] || 'audio/wav' };
+        } catch (e) {
+            console.error('fetchRecordingBytesForDownload: fallback url failed:', e.message);
+        }
+    }
+    return null;
+}
+
+// נקודת קצה פנימית בלבד (שרת-לשרת, לעולם לא נחשפת ללקוח קצה - מוגנת בסוד
+// משותף ב-X-Internal-Secret) - הפייתון (phone-transcription) קורא לה כדי
+// להעביר לכאן את בניית עמוד ההורדה של הקלטה (שליפה מימות + הטמעת הקובץ
+// כ-data: URI), ואז מזרים (streaming, בלי לבנות מחדש בזיכרון) את מה
+// שהיא מחזירה ישירות ללקוח, תחת הדומיין של הפייתון עצמו - כדי שנטפרי
+// (שכבר סומכת על דומיין הפייתון) לעולם לא תראה/תצטרך לסמוך על הדומיין
+// הזה כלל; הלקוח בדפדפן אף פעם לא פונה לכתובת הזו ישירות.
+//
+// למה זה קיים: הוכח בפועל (routes/recording_proxy.py בפרויקט הפייתון)
+// שתגובות HTTP "כבדות" (עמוד עם קובץ מוטמע כ-base64) שהפייתון בונה ושולח
+// בעצמו יוצאות קצוצות ללקוח הסופי - למרות שהשליפה מימות המשיח עצמה תמיד
+// מגיעה שלמה (מאומת בלוגים). הפרויקט הזה (Node/Express, אותו Railway) לא
+// סבל מאותה תופעה בפרויקט נפרד (הפורומים) עבור תבנית תגובה זהה (data:
+// URI). כאן הנוד בונה את העמוד המלא, והפייתון רק מזרים אותו הלאה ללא
+// buffering מלא - זה השינוי הארכיטקטוני שנועד לעקוף את הבעיה.
+app.post('/internal/download-page', async (req, res) => {
+    if (!checkInternalSecret(req, res)) return;
+    const { url, filename, call_id: callId } = req.body || {};
+    if (!url && !callId) {
+        return res.status(400).json({ error: 'missing url or call_id' });
+    }
+    const fetched = await fetchRecordingBytesForDownload(url, callId);
+    if (!fetched) {
+        return res.status(502).json({ error: 'upstream fetch failed' });
+    }
+    const b64 = fetched.buf.toString('base64');
+    const page = buildDataUriDownloadPage(filename || 'recording.wav', fetched.mimetype, b64);
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(page);
+});
 
 const router = YemotRouter({
     printLog: true,
