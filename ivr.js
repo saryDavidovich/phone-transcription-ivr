@@ -420,8 +420,26 @@ function fullEmailToParts(email) {
     ];
 }
 
+// ישן/לא בשימוש יותר (ראו digitsToFileParts למטה) - נשאר כאן רק כתיעוד/
+// גיבוי חירום.
 function speakDigits(value) {
     return String(value || '').split('').join(' ');
+}
+
+// מקריאה רצף ספרות (מספר טלפון/פקס) מתוך אותן 10 הקלטות ספרה בודדת
+// (126-135) שכבר קיימות ומשמשות לאיות מייל - אין צורך בשום הקלטה נוספת.
+// משמשת גם להקראת מספר הטלפון בהסברי שלוחות 5/6 בתפריט הראשי, וגם
+// להקראת מספר פקס (עדכון פרטים - גם הקריאה חזרה של הפקס השמור, וגם
+// אישור הפקס שהוקלד עכשיו).
+function digitsToFileParts(value) {
+    const parts = [];
+    for (const ch of String(value || '')) {
+        if (ch >= '0' && ch <= '9') {
+            parts.push(MSG(EMAIL_DIGIT_MSG_BASE + (ch.charCodeAt(0) - 48)));
+        }
+        // תו שאינו ספרה (מקף וכו') - מדלגים בשקט, כמו בשאר האיות מהקלטות.
+    }
+    return parts;
 }
 
 async function getEmailByKeypad(call) {
@@ -761,13 +779,12 @@ async function handleStudentLogin(call, attempt = 1) {
 
 async function handleEmailInstructions(call, phone, customer) {
     const hasEmail = !!(customer && customer.email);
-    const phoneSpoken = speakDigits(phone);
 
     // כל לקוח שומע את ההסבר המלא, עם מייל או בלי
     const choice = await call.read([
         // 041 - הסבר שלוחה 5 עד לפני מספר הטלפון
         MSG(41),
-        { type: 'text', data: phoneSpoken },
+        ...digitsToFileParts(phone),
         // 042 - המשך הסבר שלוחה 5 + הקש 1 לקבלת הוראות, הקש 0 לחזרה
         MSG(42),
     ], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
@@ -808,13 +825,12 @@ async function handleEmailInstructions(call, phone, customer) {
 
 async function handleHandwritingInstructions(call, phone, customer) {
     const hasEmail = !!(customer && customer.email);
-    const phoneSpoken = speakDigits(phone);
 
     // כל לקוח שומע את ההסבר המלא, עם מייל או בלי
     const choice = await call.read([
         // 043 - הסבר שלוחה 6 עד לפני מספר הטלפון
         MSG(43),
-        { type: 'text', data: phoneSpoken },
+        ...digitsToFileParts(phone),
         // 044 - המשך הסבר שלוחה 6 + הקש 1 לקבלת הוראות, הקש 0 לחזרה
         MSG(44),
     ], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
@@ -1154,7 +1170,7 @@ async function handleUpdateDetails(call, phone) {
         ? [MSG(68), ...fullEmailToParts(customer.email)] // המייל שלך הוא [דומיין מוכר: ביטוי טבעי / איות מהקלטות]
         : [MSG(74)]; // לא מעודכן מייל
     const faxParts = (customer && customer.fax)
-        ? [MSG(69), { type: 'text', data: customer.fax }] // הפקס שלך הוא [דינמי]
+        ? [MSG(69), ...digitsToFileParts(customer.fax)] // הפקס שלך הוא [רצף הקלטות ספרה-ספרה]
         : [MSG(75)]; // לא מעודכן פקס
     const deliveryParts = [
         MSG(70), // שיטת השליחה היא
@@ -1182,7 +1198,7 @@ async function handleUpdateDetails(call, phone) {
         const fax = await call.read([MSG(29)], 'tap', { max_digits: 15, terminate_keys: ['#'] });
         const confirm = await call.read([
             MSG(76), // מספר הפקס שהוקלד הוא
-            { type: 'text', data: fax },
+            ...digitsToFileParts(fax),
             MSG(67), // לאישור הקש 1, לתיקון הקש 2
         ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
         if (confirm === '2') return await handleUpdateDetails(call, phone);
