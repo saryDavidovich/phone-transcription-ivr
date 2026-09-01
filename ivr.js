@@ -273,6 +273,10 @@ function decodeEmail(input) {
     return result;
 }
 
+// ישן/לא בשימוש יותר (ראו emailToFileParts למטה) - נשאר כאן רק כתיעוד/גיבוי
+// חירום. הבעיה שהובילה להחלפתו: הקראת מייל ע"י הכתבת טקסט מעורב עברית/
+// אנגלית למנוע ה-TTS של ימות המשיח יצאה לא מדויקת/לא ברורה בפועל (הגייה
+// שגויה של אותיות ומילים באנגלית) - זו הייתה הסיבה המקורית לכל המעבר.
 function speakEmail(email) {
     if (!email) return '';
 
@@ -317,6 +321,103 @@ function speakEmail(email) {
         domain.replace(/\./g, ' נקודה ');
 
     return `${spokenLocal} שטרודל ${spokenDomain}`;
+}
+
+// מקריא מייל ע"י הרכבת רצף הקלטות אמיתיות (אות-אחר-אות/ספרה-אחר-ספרה),
+// בדיוק כמו שכל שאר המערכת כבר עובדת (MSG() למעלה) - במקום להכתיב טקסט
+// מעורב עברית/אנגלית למנוע ה-TTS של ימות המשיח, שיוצא לא מדויק בפועל.
+// כל תו הופך לפריט { type: 'file', ... } בודד (MSG עם מספר קבוע - ראו
+// טבלת המספור המלאה שנמסרה בנפרד), ו-Yemot מנגן את כל הרשימה ברצף - בדיוק
+// כמו שהיא כבר מנגנת היום רשימות של כמה MSG() ברצף בכל מקום אחר בקוד הזה.
+//
+// טווח המספור (100-146) נבחר בכוונה מעל כל מספרי ה-MSG הקיימים במערכת
+// (הגבוה ביותר שבשימוש כרגע הוא 096) - כדי לא להתנגש עם אף הודעת מערכת
+// קיימת. 097-099 הושארו כרווח בטיחות ריק. הטבלה המלאה (כולל בדיוק מה
+// להקליט בכל מספר) נמסרה בנפרד.
+//   100-125 = אותיות a-z (100=a, 101=b, ... 125=z)
+//   126-135 = ספרות 0-9 (126=0, 127=1, ... 135=9)
+//   136     = @ (שטרודל)
+//   137     = . (נקודה)
+//   138-146 = 9 דומיינים נפוצים בשלמותם (ראו KNOWN_DOMAIN_MSG_NUM למטה) -
+//             הקלטה ייעודית אחת לכל דומיין, לא איות אות-אחר-אות
+const EMAIL_LETTER_MSG_BASE = 100; // a=100 ... z=125
+const EMAIL_DIGIT_MSG_BASE = 126;  // 0=126 ... 9=135
+const EMAIL_AT_MSG_NUM = 136;
+const EMAIL_DOT_MSG_NUM = 137;
+
+function emailToFileParts(value) {
+    const parts = [];
+    for (const ch of String(value || '')) {
+        if (ch === '@') {
+            parts.push(MSG(EMAIL_AT_MSG_NUM));
+            continue;
+        }
+        if (ch === '.') {
+            parts.push(MSG(EMAIL_DOT_MSG_NUM));
+            continue;
+        }
+        const lower = ch.toLowerCase();
+        if (lower >= 'a' && lower <= 'z') {
+            parts.push(MSG(EMAIL_LETTER_MSG_BASE + (lower.charCodeAt(0) - 97)));
+            continue;
+        }
+        if (ch >= '0' && ch <= '9') {
+            parts.push(MSG(EMAIL_DIGIT_MSG_BASE + (ch.charCodeAt(0) - 48)));
+            continue;
+        }
+        // תו לא מוכר (מקף, קו תחתון וכו') - אין לו הקלטה, מדלגים בשקט במקום
+        // לעצור/לזרוק שגיאה על כל הקראת המייל בגלל תו נדיר אחד.
+    }
+    return parts;
+}
+
+// דומיינים נפוצים - כל אחד מקבל הקלטה ייעודית משלו (מישהו אומר בקול את
+// שם הדומיין בשלמותו, למשל "ג'ימייל נקודה קום"), במקום לאיית אות-אחר-אות
+// **וגם** במקום להכתיב טקסט למנוע ה-TTS של ימות המשיח - לפי בקשת המשתמש
+// לא להשתמש ב-TTS בכלל בהקראת מייל, לא רק באיות. ראו טבלת המספור המלאה
+// שנמסרה בנפרד (138-146) - כל דומיין כאן הוא MSG() בודד, לא רצף תווים.
+const KNOWN_DOMAIN_MSG_NUM = {
+    'gmail.com': 138,
+    'yahoo.com': 139,
+    'walla.com': 140,
+    'walla.co.il': 141,
+    'hotmail.com': 142,
+    'outlook.com': 143,
+    'icloud.com': 144,
+    'bezeqint.net': 145,
+    'netvision.net.il': 146,
+};
+
+// מחזירה את החלקים להקראת דומיין בלבד (בלי @) - הקלטה ייעודית אחת לדומיין
+// מוכר מהרשימה למעלה, או איות מהקלטות אות-אחר-אות לדומיין אחר. בשני
+// המקרים - רק MSG() בקבצי הקלטה, בלי שום { type: 'text' } בכלל.
+function domainToParts(domain) {
+    const lower = String(domain || '').toLowerCase();
+    if (KNOWN_DOMAIN_MSG_NUM[lower]) {
+        return [MSG(KNOWN_DOMAIN_MSG_NUM[lower])];
+    }
+    return emailToFileParts(lower);
+}
+
+// מחזירה את החלקים להקראת כתובת מייל **שלמה**: השם שלפני השטרודל מאויית
+// מהקלטות אות-אחר-אות, ואז @ (הקלטה), ואז הדומיין - הקלטה ייעודית אחת אם
+// הוא מוכר, אחרת איות מהקלטות גם הוא. כל הרכיבים כאן הם MSG() - קבצי
+// הקלטה בלבד, אין שום שימוש ב-TTS/{ type: 'text' } בהקראת מייל יותר.
+// זו הפונקציה שצריך להשתמש בה לכל הקראה של כתובת מייל **מלאה** (לא רק
+// דומיין בפני עצמו - לזה יש domainToParts למעלה).
+function fullEmailToParts(email) {
+    const value = String(email || '');
+    const atIndex = value.indexOf('@');
+    if (atIndex === -1) {
+        return emailToFileParts(value);
+    }
+    const localPart = value.substring(0, atIndex);
+    const domain = value.substring(atIndex + 1);
+    return [
+        ...emailToFileParts(localPart),
+        MSG(EMAIL_AT_MSG_NUM),
+        ...domainToParts(domain),
+    ];
 }
 
 function speakDigits(value) {
@@ -413,11 +514,11 @@ async function getDomainByVoice(call, attempt = 1) {
             return await getDomainByVoice(call, attempt + 1);
         }
 
-        const domainSpoken = speakEmail('@' + domain).replace('שטרודל ', '');
-        // 053 - הסיומת שזוהתה היא [דינמי] + 054 - לאישור הקש 1, לניסיון מחדש הקש 2
+        // 053 - הסיומת שזוהתה היא [ביטוי טבעי לדומיין מוכר, או איות מהקלטות]
+        // + 054 - לאישור הקש 1, לניסיון מחדש הקש 2
         const confirm = await call.read([
             MSG(53),
-            { type: 'text', data: domainSpoken },
+            ...domainToParts(domain),
             MSG(54)
         ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
@@ -464,11 +565,10 @@ async function getDomainAndConfirmEmail(call, localPart, mode) {
     }
 
     const email = `${localPart}@${domain}`;
-    const emailSpoken = speakEmail(email);
 
     const confirm = await call.read([
         MSG(66), // המייל שהתקבל הוא
-        { type: 'text', data: emailSpoken },
+        ...fullEmailToParts(email),
         MSG(67), // לאישור הקש 1, לתיקון הקש 2
     ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
 
@@ -1050,9 +1150,8 @@ async function handleUpdateDetails(call, phone) {
         customer = res.data;
     } catch (e) {}
 
-    const emailSpoken = customer && customer.email ? speakEmail(customer.email) : '';
-    const emailParts = emailSpoken
-        ? [MSG(68), { type: 'text', data: emailSpoken }] // המייל שלך הוא [דינמי]
+    const emailParts = (customer && customer.email)
+        ? [MSG(68), ...fullEmailToParts(customer.email)] // המייל שלך הוא [דומיין מוכר: ביטוי טבעי / איות מהקלטות]
         : [MSG(74)]; // לא מעודכן מייל
     const faxParts = (customer && customer.fax)
         ? [MSG(69), { type: 'text', data: customer.fax }] // הפקס שלך הוא [דינמי]
