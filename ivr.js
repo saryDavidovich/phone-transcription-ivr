@@ -332,8 +332,10 @@ function speakEmail(email) {
 //
 // טווח המספור (100-146) נבחר בכוונה מעל כל מספרי ה-MSG הקיימים במערכת
 // (הגבוה ביותר שבשימוש כרגע הוא 096) - כדי לא להתנגש עם אף הודעת מערכת
-// קיימת. 097-099 הושארו כרווח בטיחות ריק. הטבלה המלאה (כולל בדיוק מה
-// להקליט בכל מספר) נמסרה בנפרד.
+// קיימת. 099 נשאר כרווח בטיחות ריק. 097-098 נוצלו עבור הקראת הקוד האישי
+// לזיהוי בפקס (ראה handleFaxCode למעלה: 097 = "הקוד האישי שלך הוא",
+// 098 = "לשמיעה חוזרת הקש 1, לחזרה הקש 0" - יש להקליט את שתיהן בימות).
+// הטבלה המלאה (כולל בדיוק מה להקליט בכל מספר) נמסרה בנפרד.
 //   100-125 = אותיות a-z (100=a, 101=b, ... 125=z)
 //   126-135 = ספרות 0-9 (126=0, 127=1, ... 135=9)
 //   136     = @ (שטרודל)
@@ -826,14 +828,18 @@ async function handleEmailInstructions(call, phone, customer) {
 async function handleHandwritingInstructions(call, phone, customer) {
     const hasEmail = !!(customer && customer.email);
 
-    // כל לקוח שומע את ההסבר המלא, עם מייל או בלי
+    // כל לקוח שומע את ההסבר המלא, עם מייל או בלי. הקש 2 (חדש) - שמיעת הקוד
+    // האישי לזיהוי בפקס, ראה handleFaxCode למטה. יש לעדכן את הקלטה 044
+    // הקיימת בימות כך שתזכיר גם את הקש 2 (בנוסף להקש 1 הקיים) - התוכן
+    // הטקסטואלי המדויק שיש להקליט נמסר בנפרד למשתמש.
     const choice = await call.read([
         // 043 - הסבר שלוחה 6 עד לפני מספר הטלפון
         MSG(43),
         ...digitsToFileParts(phone),
-        // 044 - המשך הסבר שלוחה 6 + הקש 1 לקבלת הוראות, הקש 0 לחזרה
+        // 044 - המשך הסבר שלוחה 6 + הקש 1 לקבלת הוראות במייל, הקש 2 לשמיעת
+        // הקוד האישי לזיהוי בפקס, הקש 0 לחזרה (יש לעדכן את ההקלטה בימות!)
         MSG(44),
-    ], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
+    ], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2] });
 
     if (choice === '1') {
         if (hasEmail) {
@@ -864,6 +870,53 @@ async function handleHandwritingInstructions(call, phone, customer) {
             ]);
         }
         return;
+    }
+
+    if (choice === '2') {
+        await handleFaxCode(call, phone);
+        return;
+    }
+
+    await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
+}
+
+// הקראת הקוד האישי (5 ספרות) לזיהוי בשליחת פקס - בכוונה **רק** בטלפון,
+// לעולם לא נשלח במייל (ראה routes/dictate.py._send_manuscript_email
+// בפרויקט הפייתון - הוסר משם בכוונה). כל לקוח יכול לשמוע את הקוד שלו כמה
+// פעמים שירצה, בכל שיחה - נוצר עצלנית בצד הפייתון בפעם הראשונה שמבקשים
+// אותו (routes/api.py get_customer_fax_code).
+async function handleFaxCode(call, phone) {
+    let faxCode = null;
+    try {
+        const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}/fax-code`);
+        faxCode = res.data.fax_code;
+    } catch (e) {
+        if (isHangup(e)) {
+            console.log('handleFaxCode: call hangup, aborting flow');
+            throw e;
+        }
+        console.error('fax-code lookup error:', e.message);
+    }
+
+    if (!faxCode) {
+        await call.id_list_message([
+            // 039 - אירעה שגיאה (משותפת עם send-handwriting-instructions למעלה)
+            MSG(39),
+            { type: 'go_to_folder', data: '/' }
+        ]);
+        return;
+    }
+
+    // 097 - הקוד האישי שלך הוא (הודעה חדשה - יש להקליט בימות)
+    // 098 - לשמיעה חוזרת הקש 1, לחזרה לתפריט הראשי הקש 0 (הודעה חדשה - יש להקליט בימות)
+    const again = await call.read([
+        MSG(97),
+        ...digitsToFileParts(faxCode),
+        MSG(98),
+    ], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
+
+    if (again === '1') {
+        return await handleFaxCode(call, phone);
     }
 
     await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
