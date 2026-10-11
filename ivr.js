@@ -10,6 +10,20 @@ app.use(express.json({ limit: '2mb' }));
 
 const PYTHON_URL = process.env.PYTHON_URL || 'https://web-production-90272.up.railway.app';
 
+// --- מפתח משותף מול שרת הפייתון (API_SHARED_SECRET) ---
+// כשהמשתנה מוגדר גם כאן וגם בשרת הפייתון, כל קריאה לשרת הפייתון נושאת אותו בכותרת
+// X-API-Key, ושרת הפייתון דוחה כל קריאה ל-/api בלי המפתח. ההוספה נעשית *רק* לכתובות
+// של שרת הפייתון - ולעולם לא לשרתים אחרים (למשל call2all של ימות), כדי שהמפתח לא יזלוג.
+const API_SHARED_SECRET = process.env.API_SHARED_SECRET || '';
+axios.interceptors.request.use((config) => {
+    const url = String(config.url || '');
+    if (API_SHARED_SECRET && url.startsWith(PYTHON_URL + '/')) {
+        config.headers = config.headers || {};
+        config.headers['X-API-Key'] = API_SHARED_SECRET;
+    }
+    return config;
+});
+
 // --- proxy שקוף להורדת הקלטות דרך הפייתון - ראו הסבר מפורט מעל
 // app.post('/internal/download-page', ...) למטה, ו"עדכון 5" ב-
 // routes/recording_proxy.py בפרויקט הפייתון (phone-transcription). ---
