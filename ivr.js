@@ -462,9 +462,9 @@ async function resendDocument(call, phone, d) {
 // "הקלטה עם עריכה" (ניסיוני - כרגע רק מתפריט המנהל, הקש 3).
 // רץ בשלוחת API נפרדת בימות (PHONE_EDIT_FOLDER) שבה מוגדר record_stop_any_key=yes,
 // כך שכל מקש עוצר את ההקלטה. מיד אחרי העצירה נפתח "חלון" של 2 שניות להקשה:
-//   כוכבית ואז ספרה (למשל *2)  -> מבוצעת הפעולה, וההקלטה ממשיכה מיד (קטע חדש)
-//   סולמית (כמו בכל הקלטה)     -> סיום ושליחה לתמלול, מיד
-//   כוכבית לבד / פעמיים כוכבית  -> תפריט העריכה (הודעה 179)
+//   סולמית ואז ספרה (למשל #2)  -> מבוצעת הפעולה, וההקלטה ממשיכה מיד (קטע חדש)
+//   סולמית ואז כוכבית (#*)     -> תפריט העריכה (הודעה 179)
+//   סולמית ואז כלום (2 שניות)  -> סיום ושליחה לתמלול
 // כל קטע נשמר כקובץ נפרד בתיקייה /recordings_edit, והשרת מתמלל קטע-קטע (OpenAI)
 // ומכניס את העיצוב בדיוק בגבול בין הקטעים. ניתוק = שליחה של מה שהוקלט עד אז.
 // ---------------------------------------------------------------------------
@@ -472,13 +472,7 @@ const PHONE_EDIT_FOLDER = '197';   // מספר השלוחה בימות - יש ל
 const EDIT_KEYS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '*'];
 
 async function handlePhoneEditRecording(call, phone) {
-    // ממצא מהשיחה הראשונה (לוג 16.10.2026): המקש שעוצר את ההקלטה *כן* מגיע לשרת -
-    // ימות שומרת אותו ומעבירה אותו כמקש הראשון בפעולת ההקשה הבאה. לכן:
-    //   1. מיד אחרי ההקלטה קוראים מקש אחד = המקש שעצר את ההקלטה.
-    //      סולמית מגיעה כערך ריק (סולמית מסיימת הקשה בימות) -> סיום ושליחה מיד.
-    //   2. אם עצרו בכוכבית - קוראים את המקש הבא (חלון של 2 שניות) = מספר הפעולה.
-    //      אין מקש -> תפריט העריכה (179).
-    //   3. אם עצרו בספרה ישירות - הספרה היא הפעולה.
+    // פעולות עריכה: "סולמית ומיד מספר" (ראה הסבר בגוף הלולאה).
     const segments = [];
     const st = { bold: false, underline: false, square: false, round: false, quote: false, newPara: false };
     let intro = MSG(178);   // 178 - הסבר קצר על הקלטה עם עריכה + צליל
@@ -537,27 +531,29 @@ async function handlePhoneEditRecording(call, phone) {
                 st.newPara = false;
             }
 
-            // 1. המקש שעצר את ההקלטה (ימות שומרת אותו לפעולה הבאה)
-            const stopKey = await call.read([MSG(177)], 'tap', {
-                max_digits: 1, sec_wait: 2, digits_allowed: EDIT_KEYS, allow_empty: true, empty_val: 'NONE'
-            });
-            log(`STOP key raw=${JSON.stringify(stopKey)}`);
-            if (stopKey === 'NONE' || !stopKey) break;   // סולמית (או שתיקה/ניתוק) -> סיום ושליחה
-
-            // 2. עצרו בכוכבית -> המקש הבא הוא הפעולה; אין מקש -> תפריט העריכה
-            let actionKey = stopKey;
-            if (stopKey === '*') {
-                actionKey = await call.read([MSG(177)], 'tap', {
+            // רק סולמית עוצרת הקלטה דרך ה-API (בדיקה בשיחה 16.10.2026: record_stop_any_key לא חל
+            // על הקלטת API - כוכבית לא עצרה). לכן הפעולה היא "סולמית ומיד מספר":
+            //   # ואז ספרה  -> הפעולה, וההקלטה ממשיכה      # ואז *  -> תפריט העריכה (179)
+            //   # ואז כלום (2 שניות) -> סיום ושליחה
+            // ימות יכולה להעביר את הסולמית עצמה כהקשה ריקה בפעולה הבאה - לכן אם הקריאה
+            // הראשונה ריקה, קוראים פעם נוספת לפני שמחליטים "סיום".
+            const readKey = async (label) => {
+                const k = await call.read([MSG(177)], 'tap', {
                     max_digits: 1, sec_wait: 2, digits_allowed: EDIT_KEYS, allow_empty: true, empty_val: 'NONE'
                 });
-                log(`AFTER-STAR key raw=${JSON.stringify(actionKey)}`);
-                if (actionKey === 'NONE' || actionKey === '*' || !actionKey) {
-                    actionKey = await call.read([MSG(179)], 'tap', {   // 179 - תפריט העריכה
-                        max_digits: 1, digits_allowed: EDIT_KEYS.filter(k => k !== '*'),
-                        allow_empty: true, empty_val: '0', timeout: 120000
-                    });
-                    log(`MENU-179 key raw=${JSON.stringify(actionKey)}`);
-                }
+                log(`${label} key raw=${JSON.stringify(k)}`);
+                return (k && k !== 'NONE') ? k : null;
+            };
+            let actionKey = await readKey('AFTER-STOP-1');
+            if (!actionKey) actionKey = await readKey('AFTER-STOP-2');
+            if (!actionKey) break;                       // סולמית ואז כלום -> סיום ושליחה
+
+            if (actionKey === '*') {
+                actionKey = await call.read([MSG(179)], 'tap', {   // 179 - תפריט העריכה
+                    max_digits: 1, digits_allowed: EDIT_KEYS.filter(k => k !== '*'),
+                    allow_empty: true, empty_val: '0', timeout: 120000
+                });
+                log(`MENU-179 key raw=${JSON.stringify(actionKey)}`);
             }
             applyAction(actionKey);   // '0' - חזרה להקלטה בלי פעולה
         }
