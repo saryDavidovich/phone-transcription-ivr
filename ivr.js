@@ -463,8 +463,8 @@ async function resendDocument(call, phone, d) {
 // רץ בשלוחת API נפרדת בימות (PHONE_EDIT_FOLDER) שבה מוגדר record_stop_any_key=yes,
 // כך שכל מקש עוצר את ההקלטה. מיד אחרי העצירה נפתח "חלון" של 2 שניות להקשה:
 //   כוכבית ואז ספרה (למשל *2)  -> מבוצעת הפעולה, וההקלטה ממשיכה מיד (קטע חדש)
-//   סולמית (כמו בכל הקלטה)     -> הודעה 182 קצרה, ואם לא מקישים כלום - סיום ושליחה
-//   כוכבית ואז כוכבית (**)      -> תפריט העריכה (הודעה 179)
+//   סולמית (כמו בכל הקלטה)     -> סיום ושליחה לתמלול, מיד
+//   כוכבית לבד / פעמיים כוכבית  -> תפריט העריכה (הודעה 179)
 // כל קטע נשמר כקובץ נפרד בתיקייה /recordings_edit, והשרת מתמלל קטע-קטע (OpenAI)
 // ומכניס את העיצוב בדיוק בגבול בין הקטעים. ניתוק = שליחה של מה שהוקלט עד אז.
 // ---------------------------------------------------------------------------
@@ -472,30 +472,64 @@ const PHONE_EDIT_FOLDER = '197';   // מספר השלוחה בימות - יש ל
 const EDIT_KEYS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '*'];
 
 async function handlePhoneEditRecording(call, phone) {
+    // ממצא מהשיחה הראשונה (לוג 16.10.2026): המקש שעוצר את ההקלטה *כן* מגיע לשרת -
+    // ימות שומרת אותו ומעבירה אותו כמקש הראשון בפעולת ההקשה הבאה. לכן:
+    //   1. מיד אחרי ההקלטה קוראים מקש אחד = המקש שעצר את ההקלטה.
+    //      סולמית מגיעה כערך ריק (סולמית מסיימת הקשה בימות) -> סיום ושליחה מיד.
+    //   2. אם עצרו בכוכבית - קוראים את המקש הבא (חלון של 2 שניות) = מספר הפעולה.
+    //      אין מקש -> תפריט העריכה (179).
+    //   3. אם עצרו בספרה ישירות - הספרה היא הפעולה.
     const segments = [];
     const st = { bold: false, underline: false, square: false, round: false, quote: false, newPara: false };
     let intro = MSG(178);   // 178 - הסבר קצר על הקלטה עם עריכה + צליל
     let sent = false;
+    let recNo = 0;
+    const tag = `[edit ${call.ApiCallId}]`;
+    const log = (...args) => console.log(tag, ...args);
+    log('START phone', phone);
 
-    const literal = (text, noBefore, noAfter) => segments.push({
-        type: 'literal', text, bold: st.bold, underline: st.underline,
-        new_paragraph: st.newPara, no_space_before: !!noBefore, no_space_after: !!noAfter
-    });
-    const send = async () => {
-        if (sent || !segments.some(s => s.type === 'audio')) return;
+    const literal = (text, noBefore, noAfter) => {
+        segments.push({
+            type: 'literal', text, bold: st.bold, underline: st.underline,
+            new_paragraph: st.newPara, no_space_before: !!noBefore, no_space_after: !!noAfter
+        });
+        log(`literal "${text}" added (bold=${st.bold} underline=${st.underline})`);
+    };
+    const send = async (why) => {
+        log(`SEND (${why}) segments=${segments.length}:`, JSON.stringify(segments.map(s => ({
+            t: s.type, f: s.rec_url ? s.rec_url.split('path=ivr2:')[1] : undefined, x: s.text,
+            b: s.bold, u: s.underline, p: s.new_paragraph
+        }))));
+        if (sent || !segments.some(s => s.type === 'audio')) { log('SEND skipped (already sent or no audio)'); return; }
         sent = true;
         try {
-            await axios.post(`${PYTHON_URL}/api/phone-edit`, { phone, call_id: call.ApiCallId, segments });
+            const r = await axios.post(`${PYTHON_URL}/api/phone-edit`, { phone, call_id: call.ApiCallId, segments });
+            log('SEND result', JSON.stringify(r.data));
         } catch (e) {
-            console.error('phone-edit send error:', e.message);
+            log('SEND error', e.response ? `${e.response.status} ${JSON.stringify(e.response.data)}` : e.message);
         }
+    };
+    const applyAction = (key) => {
+        if (key === '1') st.newPara = true;                       // ירידת שורה
+        else if (key === '2') st.bold = !st.bold;                 // הדגשה / סיום הדגשה
+        else if (key === '3') st.underline = !st.underline;       // קו תחתון / סיום
+        else if (key === '4') { literal(st.square ? ']' : '[', st.square, !st.square); st.square = !st.square; }
+        else if (key === '5') { literal(st.round ? ')' : '(', st.round, !st.round); st.round = !st.round; }
+        else if (key === '6') literal('-', true, true);           // מקף
+        else if (key === '7') literal(':', true, false);          // נקודתיים
+        else if (key === '8') literal('?', true, false);          // סימן שאלה
+        else if (key === '9') { literal('"', st.quote, !st.quote); st.quote = !st.quote; }  // מירכאות
+        log(`ACTION key=${JSON.stringify(key)} -> state ${JSON.stringify(st)}`);
     };
 
     try {
         while (true) {
+            recNo++;
+            log(`RECORD #${recNo} start (intro ${intro.data})`);
             const recPath = await call.read([intro], 'record', {
                 no_confirm_menu: true, save_on_hangup: true, path: '/recordings_edit', timeout: 3600000
             });
+            log(`RECORD #${recNo} returned value=${JSON.stringify(recPath)}`);
             intro = MSG(177);   // 177 - צליל קצר (המשך הקלטה מיידי)
             if (recPath) {
                 segments.push({ type: 'audio', rec_url: yemotDownloadUrl(recPath),
@@ -503,38 +537,37 @@ async function handlePhoneEditRecording(call, phone) {
                 st.newPara = false;
             }
 
-            // מיד אחרי העצירה מושמעת הודעה 182, ואפשר להקיש תוך כדי (בלי לחכות לסופה):
-            //   ספרה (למשל אחרי *: *2)  -> הפעולה מתבצעת וההקלטה ממשיכה
-            //   כוכבית                    -> תפריט העריכה (179)
-            //   כלום (עצרו בסולמית)       -> סיום ושליחה לתמלול
-            // (ימות לא מדווחת איזה מקש עצר את ההקלטה - לכן ההבחנה היא לפי מה שבא אחריו)
-            let key = await call.read([MSG(182)], 'tap', {
-                max_digits: 1, sec_wait: 3, digits_allowed: EDIT_KEYS, allow_empty: true, empty_val: 'END'
+            // 1. המקש שעצר את ההקלטה (ימות שומרת אותו לפעולה הבאה)
+            const stopKey = await call.read([MSG(177)], 'tap', {
+                max_digits: 1, sec_wait: 2, digits_allowed: EDIT_KEYS, allow_empty: true, empty_val: 'NONE'
             });
-            if (key === 'END' || !key) break;                         // סיום ושליחה
-            if (key === '*') {
-                key = await call.read([MSG(179)], 'tap', {   // 179 - תפריט העריכה
-                    max_digits: 1, digits_allowed: EDIT_KEYS.filter(k => k !== '*'),
-                    allow_empty: true, empty_val: '0', timeout: 120000
+            log(`STOP key raw=${JSON.stringify(stopKey)}`);
+            if (stopKey === 'NONE' || !stopKey) break;   // סולמית (או שתיקה/ניתוק) -> סיום ושליחה
+
+            // 2. עצרו בכוכבית -> המקש הבא הוא הפעולה; אין מקש -> תפריט העריכה
+            let actionKey = stopKey;
+            if (stopKey === '*') {
+                actionKey = await call.read([MSG(177)], 'tap', {
+                    max_digits: 1, sec_wait: 2, digits_allowed: EDIT_KEYS, allow_empty: true, empty_val: 'NONE'
                 });
+                log(`AFTER-STAR key raw=${JSON.stringify(actionKey)}`);
+                if (actionKey === 'NONE' || actionKey === '*' || !actionKey) {
+                    actionKey = await call.read([MSG(179)], 'tap', {   // 179 - תפריט העריכה
+                        max_digits: 1, digits_allowed: EDIT_KEYS.filter(k => k !== '*'),
+                        allow_empty: true, empty_val: '0', timeout: 120000
+                    });
+                    log(`MENU-179 key raw=${JSON.stringify(actionKey)}`);
+                }
             }
-            if (key === '1') st.newPara = true;                       // ירידת שורה
-            else if (key === '2') st.bold = !st.bold;                 // הדגשה / סיום הדגשה
-            else if (key === '3') st.underline = !st.underline;       // קו תחתון / סיום
-            else if (key === '4') { literal(st.square ? ']' : '[', st.square, !st.square); st.square = !st.square; }
-            else if (key === '5') { literal(st.round ? ')' : '(', st.round, !st.round); st.round = !st.round; }
-            else if (key === '6') literal('-', true, true);           // מקף
-            else if (key === '7') literal(':', true, false);          // נקודתיים
-            else if (key === '8') literal('?', true, false);          // סימן שאלה
-            else if (key === '9') { literal('"', st.quote, !st.quote); st.quote = !st.quote; }  // מירכאות
-            // '0' - חזרה להקלטה בלי פעולה
+            applyAction(actionKey);   // '0' - חזרה להקלטה בלי פעולה
         }
     } catch (e) {
-        if (isHangup(e) || isTimeout(e)) await send();
+        log(`EXCEPTION ${e && e.name}: ${e && e.message}`);
+        if (isHangup(e) || isTimeout(e)) await send(isHangup(e) ? 'hangup' : 'timeout');
         throw e;
     }
 
-    await send();
+    await send('finished');
     await call.id_list_message([
         MSG(26),   // 026 - ההקלטה התקבלה, התמלול ישלח אליך בקרוב, שיחה טובה
         { type: 'go_to_folder', data: '/' }
