@@ -249,6 +249,298 @@ function isHangup(e) {
     return e instanceof HangupError || e?.name === 'HangupError' || /hangup/i.test(e?.message || '');
 }
 
+function yemotDownloadUrl(path) {
+    if (!path || path.startsWith('http')) return path;
+    const clean = path.startsWith('/') ? path : `/${path}`;
+    return `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${clean}`;
+}
+
+function isTimeout(e) {
+    return e?.name === 'TimeoutError';
+}
+
+// ---------------------------------------------------------------------------
+// הקלטה עם תפריט אחרי סולמית (הודעה 150):
+//   1 - שמירה ושליחה לתמלול
+//   2 - הקלטה מחדש: מקליטים שוב לאותו קובץ (הקודם מוחלף)
+//   3 - המשך הקלטה: ימות מוסיפה את ההמשך לסוף אותו קובץ (append_to_existing_file),
+//       כך שבסוף יש קובץ אחד = הקלטה אחת, מייל אחד וחיוב אחד לפי האורך הכולל.
+// ההקלטה הראשונה נשמרת כרגיל במספור הרץ של ימות (למשל /recordings/051.wav),
+// ורק ההמשך/ההקלטה מחדש משתמשים באותו מספר.
+// ניתוק או שתיקה ארוכה בתפריט = כמו "1" (שליחה), בדיוק כמו "לסיום נתק" היום.
+// ---------------------------------------------------------------------------
+async function recordWithMenu(call, phone, customer, opts) {
+    let recPath = null;      // הנתיב שימות החזירה בהקלטה הראשונה
+    let fileName = null;     // מספר הקובץ (בלי סיומת) - להמשך/הקלטה מחדש
+    let append = false;
+    let intro = MSG(23);     // 023 - השאר את הודעתך לאחר הצליל, לסיום הקש סולמית או נתק
+    try {
+        while (true) {
+            const recOpts = { no_confirm_menu: true, save_on_hangup: true, path: '/recordings' };
+            if (fileName) {
+                recOpts.file_name = fileName;
+                recOpts.append_to_existing_file = append;
+            }
+            const got = await call.read([intro], 'record', recOpts);
+            if (!recPath) {
+                recPath = (typeof got === 'string' && got) ? got : null;
+                const m = recPath && recPath.match(/([^/]+)\.wav$/i);
+                fileName = m ? m[1] : null;
+            }
+            if (!fileName) return recPath;   // לא הצלחנו לזהות את שם הקובץ - שולחים כמו פעם
+
+            const choice = await call.read([
+                MSG(150)  // 150 - לשמירת ההקלטה ושליחה לתמלול הקישו 1, להקלטה מחדש הקישו 2, להמשך ההקלטה הקישו 3
+            ], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3], timeout: 120000 });
+
+            if (choice === '2') {
+                append = false;
+                intro = MSG(151);  // 151 - הקליטו מחדש לאחר הצליל, בסיום הקישו סולמית
+                continue;
+            }
+            if (choice === '3') {
+                append = true;
+                intro = MSG(152);  // 152 - המשיכו להקליט לאחר הצליל, בסיום הקישו סולמית
+                continue;
+            }
+            return recPath;
+        }
+    } catch (e) {
+        if ((isHangup(e) || isTimeout(e)) && recPath) {
+            await sendRecordingOnHangup(phone, customer, recPath, call.ApiCallId, opts);
+        }
+        throw e;
+    }
+}
+
+// ניתוק/שתיקה בתפריט אחרי ההקלטה - שולחים לתמלול ליעד הקבוע של הלקוח (אם יש)
+async function sendRecordingOnHangup(phone, customer, recPath, callId, opts) {
+    const method = customer ? customer.delivery_method : '';
+    const to = method === 'fax' ? (customer.fax || '') : method === 'email' ? (customer.email || '') : '';
+    if (!to) {
+        console.log('hangup after recording: no delivery target saved - recording not sent');
+        return;
+    }
+    try {
+        await axios.post(`${PYTHON_URL}/api/transcribe`, {
+            phone,
+            rec_url: yemotDownloadUrl(recPath),
+            call_id: callId,
+            delivery_method: method,
+            delivered_to: to,
+            transcription_tier: opts.transcriptionTier,
+            language: opts.language,
+            output_language: opts.outputLanguage
+        });
+        console.log(`hangup after recording: sent ${recPath} for transcription`);
+    } catch (err) {
+        console.error('hangup transcribe error:', err.message);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// שלוחה 8 - היסטוריית מסמכים: הלקוח שומע את המסמכים שלו (מהחדש לישן) ויכול
+// לקבל כל אחד שוב ליעד הנוכחי שלו. מייל - חינם. פקס - בתשלום, עם אישור.
+// כל ההודעות הן קבצים מוקלטים (150-176); מספרים ותאריך עברי - מנוע ההשמעה של ימות.
+// השרת: GET /api/customer/<phone>/documents, POST .../documents/resend
+// ---------------------------------------------------------------------------
+const DOC_TYPE_MSG = { recording: 156, ocr: 157, manuscript: 158 };
+
+function moneyParts(amount) {
+    const shekel = Math.floor(amount);
+    const agorot = Math.round((amount - shekel) * 100);
+    const parts = [];
+    if (shekel) parts.push({ type: 'number', data: shekel }, MSG(168));        // 168 - שקל
+    if (agorot) parts.push({ type: 'number', data: agorot }, MSG(167));        // 167 - אגורות
+    return parts;
+}
+
+function documentParts(d, index, total) {
+    const parts = [
+        MSG(154), { type: 'number', data: index + 1 },   // 154 - מסמך
+        MSG(155), { type: 'number', data: total },       // 155 - מתוך
+        MSG(DOC_TYPE_MSG[d.type] || 156),                // 156/157/158 - סוג המסמך
+    ];
+    if (d.date_ddmmyyyy) parts.push(MSG(159), { type: 'dateH', data: d.date_ddmmyyyy });   // 159 - מתאריך
+    if (d.hour !== null && d.hour !== undefined) {
+        parts.push(MSG(180), { type: 'number', data: d.hour });                              // 180 - בשעה
+        if (d.minute) parts.push({ type: 'number', data: d.minute });
+    }
+    if (d.type === 'recording' && d.minutes) {
+        if (d.minutes === 1) parts.push(MSG(176));                                          // 176 - באורך דקה אחת
+        else parts.push(MSG(160), { type: 'number', data: d.minutes }, MSG(161));           // 160 - באורך, 161 - דקות
+    }
+    return parts;
+}
+
+async function handleDocuments(call, phone) {
+    let data = null;
+    try {
+        data = (await axios.get(`${PYTHON_URL}/api/customer/${phone}/documents`)).data;
+    } catch (e) {
+        console.error('documents list error:', e.message);
+    }
+    if (!data || !data.count) {
+        // 153 - לא נמצאו מסמכים קודמים
+        await call.id_list_message([MSG(153), { type: 'go_to_folder', data: '/' }]);
+        return;
+    }
+
+    const docs = data.docs;
+    let i = 0;
+    let note = null;
+    let play = false;
+    while (true) {
+        const d = docs[i];
+        const canPlay = !!d.play_path;   // רק הקלטה מהטלפון (קיימת בימות) - לא קבצי מייל/דרייב/כתב-יד
+        const parts = [];
+        if (note) parts.push(MSG(note));
+        note = null;
+        if (play) {
+            parts.push({ type: 'file', data: d.play_path });   // ההקלטה עצמה; הקשה עוצרת ומפעילה את הבחירה
+            play = false;
+        } else {
+            parts.push(...documentParts(d, i, docs.length));
+        }
+        // 181 - (הקלטה) לשמיעת ההקלטה הקישו 4, לקבלת המסמך שוב 1, הבא 2, הקודם 3, חזרה 0
+        // 162 - (שאר המסמכים) לקבלת המסמך שוב הקישו 1, הבא 2, הקודם 3, חזרה לתפריט הראשי 0
+        parts.push(MSG(canPlay ? 181 : 162));
+        const choice = await call.read(parts, 'tap', {
+            max_digits: 1, digits_allowed: canPlay ? [0, 1, 2, 3, 4] : [0, 1, 2, 3]
+        });
+
+        if (choice === '4' && canPlay) {
+            play = true;
+            continue;
+        }
+
+        if (choice === '2') {
+            if (i < docs.length - 1) i++; else note = 174;   // 174 - זה המסמך האחרון
+            continue;
+        }
+        if (choice === '3') {
+            if (i > 0) i--; else note = 175;                 // 175 - זה המסמך הראשון
+            continue;
+        }
+        if (choice !== '1') {
+            await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
+            return;
+        }
+        note = await resendDocument(call, phone, d);
+    }
+}
+
+// מחזיר מספר הודעה להשמעה לפני חזרה לתפריט המסמך
+async function resendDocument(call, phone, d) {
+    const url = `${PYTHON_URL}/api/customer/${phone}/documents/resend`;
+    let r;
+    try {
+        r = (await axios.post(url, { type: d.type, id: d.id })).data;
+        if (r.status === 'needs_confirm') {
+            const ok = await call.read([
+                MSG(165), ...moneyParts(r.cost),   // 165 - שליחה חוזרת לפקס עולה
+                MSG(166)                           // 166 - לאישור הקישו 1, לביטול וחזרה הקישו 2
+            ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+            if (ok !== '1') return 169;           // 169 - השליחה בוטלה
+            r = (await axios.post(url, { type: d.type, id: d.id, confirm: 1 })).data;
+        }
+    } catch (e) {
+        if (isHangup(e)) throw e;
+        console.error('document resend error:', e.message);
+        return 173;                                // 173 - השליחה נכשלה, נסו שוב מאוחר יותר
+    }
+    switch (r && r.status) {
+        case 'sent': return r.via === 'fax' ? 164 : 163;   // 164 - נשלח לפקס, 163 - נשלח למייל
+        case 'no_balance': return 170;                      // 170 - אין מספיק יתרה לשליחה בפקס
+        case 'no_target': return 171;                       // 171 - לא מוגדר מייל או פקס לשליחה...
+        case 'limit': return 172;                           // 172 - הגעתם למספר השליחות החוזרות המרבי להיום
+        default: return 173;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// "הקלטה עם עריכה" (ניסיוני - כרגע רק מתפריט המנהל, הקש 3).
+// רץ בשלוחת API נפרדת בימות (PHONE_EDIT_FOLDER) שבה מוגדר record_stop_any_key=yes,
+// כך שכל מקש עוצר את ההקלטה. מיד אחרי העצירה נפתח "חלון" של 2 שניות להקשה:
+//   כוכבית ואז ספרה (למשל *2)  -> מבוצעת הפעולה, וההקלטה ממשיכה מיד (קטע חדש)
+//   סולמית (כמו בכל הקלטה)     -> הודעה 182 קצרה, ואם לא מקישים כלום - סיום ושליחה
+//   כוכבית ואז כוכבית (**)      -> תפריט העריכה (הודעה 179)
+// כל קטע נשמר כקובץ נפרד בתיקייה /recordings_edit, והשרת מתמלל קטע-קטע (OpenAI)
+// ומכניס את העיצוב בדיוק בגבול בין הקטעים. ניתוק = שליחה של מה שהוקלט עד אז.
+// ---------------------------------------------------------------------------
+const PHONE_EDIT_FOLDER = '197';   // מספר השלוחה בימות - יש ליצור אותה (ראה הסבר)
+const EDIT_KEYS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '*'];
+
+async function handlePhoneEditRecording(call, phone) {
+    const segments = [];
+    const st = { bold: false, underline: false, square: false, round: false, quote: false, newPara: false };
+    let intro = MSG(178);   // 178 - הסבר קצר על הקלטה עם עריכה + צליל
+    let sent = false;
+
+    const literal = (text, noBefore, noAfter) => segments.push({
+        type: 'literal', text, bold: st.bold, underline: st.underline,
+        new_paragraph: st.newPara, no_space_before: !!noBefore, no_space_after: !!noAfter
+    });
+    const send = async () => {
+        if (sent || !segments.some(s => s.type === 'audio')) return;
+        sent = true;
+        try {
+            await axios.post(`${PYTHON_URL}/api/phone-edit`, { phone, call_id: call.ApiCallId, segments });
+        } catch (e) {
+            console.error('phone-edit send error:', e.message);
+        }
+    };
+
+    try {
+        while (true) {
+            const recPath = await call.read([intro], 'record', {
+                no_confirm_menu: true, save_on_hangup: true, path: '/recordings_edit', timeout: 3600000
+            });
+            intro = MSG(177);   // 177 - צליל קצר (המשך הקלטה מיידי)
+            if (recPath) {
+                segments.push({ type: 'audio', rec_url: yemotDownloadUrl(recPath),
+                                bold: st.bold, underline: st.underline, new_paragraph: st.newPara });
+                st.newPara = false;
+            }
+
+            // מיד אחרי העצירה מושמעת הודעה 182, ואפשר להקיש תוך כדי (בלי לחכות לסופה):
+            //   ספרה (למשל אחרי *: *2)  -> הפעולה מתבצעת וההקלטה ממשיכה
+            //   כוכבית                    -> תפריט העריכה (179)
+            //   כלום (עצרו בסולמית)       -> סיום ושליחה לתמלול
+            // (ימות לא מדווחת איזה מקש עצר את ההקלטה - לכן ההבחנה היא לפי מה שבא אחריו)
+            let key = await call.read([MSG(182)], 'tap', {
+                max_digits: 1, sec_wait: 3, digits_allowed: EDIT_KEYS, allow_empty: true, empty_val: 'END'
+            });
+            if (key === 'END' || !key) break;                         // סיום ושליחה
+            if (key === '*') {
+                key = await call.read([MSG(179)], 'tap', {   // 179 - תפריט העריכה
+                    max_digits: 1, digits_allowed: EDIT_KEYS.filter(k => k !== '*'),
+                    allow_empty: true, empty_val: '0', timeout: 120000
+                });
+            }
+            if (key === '1') st.newPara = true;                       // ירידת שורה
+            else if (key === '2') st.bold = !st.bold;                 // הדגשה / סיום הדגשה
+            else if (key === '3') st.underline = !st.underline;       // קו תחתון / סיום
+            else if (key === '4') { literal(st.square ? ']' : '[', st.square, !st.square); st.square = !st.square; }
+            else if (key === '5') { literal(st.round ? ')' : '(', st.round, !st.round); st.round = !st.round; }
+            else if (key === '6') literal('-', true, true);           // מקף
+            else if (key === '7') literal(':', true, false);          // נקודתיים
+            else if (key === '8') literal('?', true, false);          // סימן שאלה
+            else if (key === '9') { literal('"', st.quote, !st.quote); st.quote = !st.quote; }  // מירכאות
+            // '0' - חזרה להקלטה בלי פעולה
+        }
+    } catch (e) {
+        if (isHangup(e) || isTimeout(e)) await send();
+        throw e;
+    }
+
+    await send();
+    await call.id_list_message([
+        MSG(26),   // 026 - ההקלטה התקבלה, התמלול ישלח אליך בקרוב, שיחה טובה
+        { type: 'go_to_folder', data: '/' }
+    ]);
+}
+
 // רשת ביטחון: שגיאה לא-תפוסה לא תפיל יותר את כל השרת (רק תירשם ללוג).
 // זה לא פותר את הבאג המקורי, אבל מונע ממנו להשבית את השירות לכל שאר המתקשרים.
 process.on('uncaughtException', (err) => {
@@ -626,6 +918,16 @@ router.get('/', async (call) => {
     await presentMainMenu(call, call.ApiPhone);
 });
 
+// שלוחת "הקלטה עם עריכה" בימות (PHONE_EDIT_FOLDER) - api_link שלה מצביע לכאן
+router.get('/phone-edit', async (call) => {
+    const ADMIN_PHONE = '0527134491';
+    if (call.ApiPhone !== ADMIN_PHONE) {   // בינתיים רק המנהל
+        await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
+        return;
+    }
+    await handlePhoneEditRecording(call, call.ApiPhone);
+});
+
 // תפריט ראשי - מופרד מ-router.get('/') כדי שאפשר יהיה להגיע אליו גם משלוחה 7
 // (זיהוי תלמיד לפי מספר תלמיד), עם הטלפון האמיתי שהתלמיד רשום תחתיו ב-DB
 // ולא הטלפון שממנו הוא בפועל מתקשר.
@@ -722,7 +1024,8 @@ async function presentMainMenu(call, phone) {
 
     const ADMIN_PHONE = '0527134491';
     // 7 — כניסה לפי מספר תלמיד (ראה handleStudentLogin), פתוח לכל מתקשר
-    const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 4, 5, 6, 7, 9] : [1, 2, 3, 4, 5, 6, 7, 9];
+    // 8 — היסטוריית מסמכים ושליחה חוזרת (ראה handleDocuments). יש לעדכן גם את הקלטת התפריט הראשי (004)
+    const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] : [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
     const choice = await call.read([
         ...pendingParts,  // הודעת הקלטה ממתינה לתשלום — נשמעת ראשונה, לפני הברכה
@@ -744,6 +1047,8 @@ async function presentMainMenu(call, phone) {
         await handleHandwritingInstructions(call, phone, customer);
     } else if (choice === '7') {
         await handleStudentLogin(call);
+    } else if (choice === '8') {
+        await handleDocuments(call, phone);
     } else if (choice === '9') {
         await handleManagerMessage(call, phone, customer);
     } else if (choice === '0' && phone === ADMIN_PHONE) {
@@ -1127,11 +1432,8 @@ async function handleRecording(call, phone, customer) {
     }
 
     // 023 - השאר את הודעתך לאחר הצליל, לסיום הקש סולמית או נתק
-    const recPath = await call.read([MSG(23)], 'record', {
-        no_confirm_menu: true,
-        save_on_hangup: true,
-        path: '/recordings'
-    });
+    // הקלטה עם תפריט אחרי סולמית: 1 שליחה, 2 הקלטה מחדש, 3 המשך הקלטה (ראה recordWithMenu)
+    const recPath = await recordWithMenu(call, phone, customer, { transcriptionTier, language, outputLanguage });
 
     console.log('recPath received:', recPath);
 
@@ -1437,11 +1739,8 @@ async function handleQuickRecord(call, phone, customer) {
     const outputLanguage = defaults.output_language || 'he';
 
     // הקלטה מיידית
-    const recPath = await call.read([MSG(23)], 'record', {
-        no_confirm_menu: true,
-        save_on_hangup: true,
-        path: '/recordings'
-    });
+    // הקלטה עם תפריט אחרי סולמית: 1 שליחה, 2 הקלטה מחדש, 3 המשך הקלטה (ראה recordWithMenu)
+    const recPath = await recordWithMenu(call, phone, customer, { transcriptionTier, language, outputLanguage });
 
     let fullRecUrl = recPath;
     if (recPath && !recPath.startsWith('http')) {
@@ -1486,11 +1785,15 @@ async function handleQuickRecord(call, phone, customer) {
 }
 
 async function handleAdminMenu(call) {
-    // 094 - לשמיעת הודעות הקש 1, למעבר לשלוחה 59 הקש 2
-    const choice = await call.read([MSG(94)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    // 094 - לשמיעת הודעות הקש 1, למעבר לשלוחה 59 הקש 2, להקלטה עם עריכה הקש 3 (יש להקליט מחדש)
+    const choice = await call.read([MSG(94)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
 
     if (choice === '2') {
         await call.id_list_message([{ type: 'go_to_folder', data: '59' }]);
+        return;
+    }
+    if (choice === '3') {
+        await call.id_list_message([{ type: 'go_to_folder', data: PHONE_EDIT_FOLDER }]);
         return;
     }
 
