@@ -42,18 +42,81 @@ function checkInternalSecret(req, res) {
     return true;
 }
 
-// --- לוח חי לדשבורד: מי על הקו ובאיזו שלוחה ---
-// רק רישום בזיכרון. לא משפיע על השיחה: כל שגיאה כאן נבלעת, וה-middleware תמיד ממשיך.
-// כל בקשה מימות מעדכנת את השיחה לפי ApiCallId; hangup=yes מוחק אותה.
-// השלב (stage) נרשם בכניסה לכל תפריט (liveStage). השרת הראשי קורא את הרשימה
-// דרך /internal/live-calls (מוגן ב-INTERNAL_PROXY_SECRET), רק כשהדשבורד פתוח.
+// --- לוח חי לדשבורד: מי על הקו, באיזו שלוחה ותת-שלוחה, והעברה לשלוחה אחרת ---
+// הרישום בזיכרון בלבד ולא משפיע על השיחה: כל שגיאה כאן נבלעת.
+// - כל בקשה מימות מעדכנת את השיחה לפי ApiCallId; hangup=yes מוחק אותה.
+// - liveStage: נקרא בכניסה לכל תפריט (שם השלב). בפעם הראשונה הוא גם "עוטף" את
+//   call.read של השיחה כדי לרשום את תת-השלוחה: ההודעה שמושמעת (מספר + תיאור,
+//   מתוך ההערות "// 045 - ..." בקוד הזה עצמו) והמקשים שהמתקשר הקיש בתפריטים.
+// - העברה מהדשבורד (/internal/live-action): CallAction של ימות (set:GOasap)
+//   מעביר מיד אם אפשר; ובכל מקרה הבקשה הבאה של אותה שיחה אצלנו מבצעת את ההעברה.
+//   באמצע הקלטה / הודעה למנהל לא מעבירים (כדי לא לשלוח הקלטה חלקית לתמלול).
 const liveCalls = new Map();
-const LIVE_MAX_AGE_MS = 2 * 60 * 60 * 1000;   // שיחה בלי שום בקשה שעתיים - נמחקת (ניתוק שלא דווח)
+const liveActions = new Map();   // callId -> { type: 'menu'|'folder'|'hangup', target, at }
+const liveJumps = new Map();     // callId -> ספרה בתפריט הראשי (אחרי העברה לתפריט)
+const LIVE_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+const LIVE_NO_TRANSFER = ['1 · הקלטה לתמלול', '4 · הקלטה מהירה', 'הקלטה עם עריכה', '9 · הודעה למנהל'];
+const MSG_DESC = (() => {
+    const m = {};
+    try {
+        const src = require('fs').readFileSync(__filename, 'utf8');
+        for (const x of src.matchAll(/\/\/\s*(\d{3})\s*[-–]\s*([^\n]+)/g)) {
+            if (!m[+x[1]]) m[+x[1]] = x[2].trim().slice(0, 90);
+        }
+    } catch (_) { /* בלי תיאורים */ }
+    return m;
+})();
+function msgNumOf(item) {
+    const mm = item && typeof item.data === 'string' && item.data.match(/הודעות מערכת\/(\d{3})\//);
+    return mm ? +mm[1] : null;
+}
 function liveStage(call, stage) {
     try {
         const c = liveCalls.get(call && call.ApiCallId);
-        if (c && c.stage !== stage) { c.stage = stage; c.stageSince = Date.now(); }
+        if (c && c.stage !== stage) {
+            c.stage = stage; c.stageSince = Date.now(); c.sub = ''; c.subNum = null;
+            if (stage === 'תפריט ראשי') c.keys = [];
+        }
+        if (call && !call.__liveWrapped && typeof call.read === 'function') {
+            call.__liveWrapped = true;
+            const origRead = call.read.bind(call);
+            call.read = async (messages, mode = 'tap', options = {}) => {
+                try {
+                    const cc = liveCalls.get(call.ApiCallId);
+                    if (cc) {
+                        let num = null;
+                        for (const it of (Array.isArray(messages) ? messages : [])) { const n = msgNumOf(it); if (n !== null) num = n; }
+                        cc.subNum = num; cc.sub = num !== null ? (MSG_DESC[num] || '') : ''; cc.mode = mode;
+                    }
+                } catch (_) { /* */ }
+                const val = await origRead(messages, mode, options);
+                try {
+                    const cc = liveCalls.get(call.ApiCallId);
+                    if (cc && mode === 'tap' && options && options.max_digits === 1 && /^\d$/.test(String(val))) {
+                        cc.keys = (cc.keys || []).concat(String(val)).slice(-8);
+                    }
+                } catch (_) { /* */ }
+                return val;
+            };
+        }
     } catch (_) { /* לעולם לא מפריע לשיחה */ }
+}
+// אחרי העברה לתפריט הראשי עם יעד: presentMainMenu לוקח מכאן את הבחירה במקום לשאול
+function takeLiveJump(call) {
+    try {
+        const d = liveJumps.get(call && call.ApiCallId);
+        if (d) { liveJumps.delete(call.ApiCallId); return d; }
+    } catch (_) { /* */ }
+    return null;
+}
+// מסיים את "הזרימה" הישנה של השיחה אצלנו (כאילו נותק), כדי שלא תמשיך לחכות לתשובה
+function liveAbandonFlow(id) {
+    try {
+        if (router.activeCalls && router.activeCalls[id]) {
+            router.events.emit(id, true);
+            router.deleteCall(id);
+        }
+    } catch (e) { console.error('liveAbandonFlow:', e.message); }
 }
 app.use((req, res, next) => {
     try {
@@ -61,20 +124,40 @@ app.use((req, res, next) => {
         const id = q.ApiCallId;
         if (id) {
             if (q.hangup === 'yes') {
-                liveCalls.delete(id);
+                liveCalls.delete(id); liveActions.delete(id); liveJumps.delete(id);
             } else {
                 const now = Date.now();
                 let c = liveCalls.get(id);
                 if (!c) {
-                    c = { phone: String(q.ApiPhone || ''), start: now, stage: 'כניסה', stageSince: now };
+                    c = { phone: String(q.ApiPhone || ''), start: now, stage: 'כניסה', stageSince: now, keys: [] };
                     liveCalls.set(id, c);
                 }
                 c.ext = String(q.ApiExtension || '');
                 c.path = req.path;
                 c.last = now;
+                const act = liveActions.get(id);
+                if (act) {
+                    liveActions.delete(id);
+                    liveAbandonFlow(id);
+                    console.log(`[live] call ${id}: ביצוע העברה ${act.type} ${act.target || ''}`);
+                    if (act.type === 'menu') {
+                        liveJumps.set(id, act.target);
+                        c.keys = [];
+                        if (req.path !== '/') {   // מתוך שלוחה אחרת שלנו (למשל עריכה) - קודם לתפריט הראשי
+                            return res.send(`go_to_folder=/${c.rootExt || ''}`);
+                        }
+                        // ממתינים רגע שהזרימה הישנה תסתיים (היא מוחקת את השיחה מהרשימה של
+                        // הספרייה בסיומה) - ורק אז הבקשה נכנסת כשיחה חדשה לתפריט הראשי
+                        return setTimeout(next, 300);
+                    } else {
+                        liveCalls.delete(id);
+                        return res.send(`go_to_folder=${act.type === 'hangup' ? 'hangup' : act.target}`);
+                    }
+                }
+                if (req.path === '/') c.rootExt = c.ext;
             }
         }
-    } catch (_) { /* לעולם לא מפריע לשיחה */ }
+    } catch (e) { console.error('live middleware:', e.message); }
     next();
 });
 app.get('/internal/live-calls', (req, res) => {
@@ -84,12 +167,55 @@ app.get('/internal/live-calls', (req, res) => {
     for (const [id, c] of liveCalls) {
         if (now - (c.last || c.start) > LIVE_MAX_AGE_MS) { liveCalls.delete(id); continue; }
         calls.push({ id, phone: c.phone, ext: c.ext, path: c.path, stage: c.stage,
+            sub: c.sub || '', sub_num: c.subNum, keys: c.keys || [], recording: c.mode === 'record',
+            can_transfer: !LIVE_NO_TRANSFER.includes(c.stage) && c.mode !== 'record',
+            pending: liveActions.has(id) ? liveActions.get(id).type : null,
             seconds: Math.round((now - c.start) / 1000),
             stage_seconds: Math.round((now - c.stageSince) / 1000),
             idle_seconds: Math.round((now - (c.last || c.start)) / 1000) });
     }
     calls.sort((a, b) => b.seconds - a.seconds);
     res.json({ calls });
+});
+// העברה מהדשבורד. body: { id, type: 'menu'|'folder'|'hangup', target }
+// menu: target = ספרה בתפריט הראשי ('' = רק לתפריט הראשי). folder: target = נתיב שלוחה בימות ("/5").
+app.post('/internal/live-action', async (req, res) => {
+    if (!checkInternalSecret(req, res)) return;
+    const { id, type } = req.body || {};
+    let target = String((req.body || {}).target || '').trim();
+    const c = liveCalls.get(id);
+    if (!c) return res.status(404).json({ ok: false, error: 'השיחה כבר לא על הקו' });
+    if (!['menu', 'folder', 'hangup'].includes(type)) return res.status(400).json({ ok: false, error: 'פעולה לא מוכרת' });
+    if (type === 'menu' && !/^[1-9]?$/.test(target)) return res.status(400).json({ ok: false, error: 'יעד לא תקין' });
+    if (type === 'folder') {
+        if (!/^\/?[\d/]*$/.test(target)) return res.status(400).json({ ok: false, error: 'נתיב שלוחה: ספרות ולוכסנים בלבד, למשל /5/2' });
+        if (!target.startsWith('/')) target = '/' + target;
+    }
+    if (LIVE_NO_TRANSFER.includes(c.stage) || c.mode === 'record') {
+        return res.status(409).json({ ok: false, error: 'המתקשר באמצע הקלטה - אי אפשר להעביר עכשיו' });
+    }
+    liveActions.set(id, { type, target, at: Date.now() });
+    // ניסיון להעביר מיד דרך ימות. אם לא מצליח - ההעברה תתבצע בהקשה הבאה של המתקשר.
+    let immediate = false, note = '';
+    try {
+        if (!YEMOT_TOKEN) throw new Error('YEMOT_TOKEN חסר');
+        const list = await axios.get('https://www.call2all.co.il/ym/api/GetIncomingCalls', { params: { token: YEMOT_TOKEN }, timeout: 8000 });
+        const calls = (list.data && list.data.calls) || [];
+        const norm = (p) => String(p || '').replace(/\D/g, '').replace(/^972/, '0');
+        const yc = calls.find((x) => String(x.id) === String(id)) ||
+            calls.find((x) => norm(x.callerIdNum) === norm(c.phone));
+        if (!yc) throw new Error('השיחה לא נמצאה ברשימת השיחות של ימות');
+        const goto = type === 'hangup' ? 'hangup' : type === 'folder' ? target : `/${c.rootExt || c.ext || ''}`;
+        const r = await axios.get('https://www.call2all.co.il/ym/api/CallAction', {
+            params: { token: YEMOT_TOKEN, ids: yc.id, action: `set:GOasap=${goto}` }, timeout: 8000 });
+        immediate = r.data && r.data.responseStatus === 'OK';
+        if (!immediate) note = JSON.stringify(r.data).slice(0, 200);
+        console.log(`[live] CallAction ${yc.id} -> ${goto}: ${JSON.stringify(r.data).slice(0, 200)}`);
+    } catch (e) {
+        note = e.message;
+        console.error('[live] CallAction:', e.message);
+    }
+    res.json({ ok: true, immediate, note });
 });
 
 function escapeHtmlForDownloadPage(s) {
@@ -1109,7 +1235,8 @@ async function presentMainMenu(call, phone) {
     // 8 — היסטוריית מסמכים ושליחה חוזרת (ראה handleDocuments). יש לעדכן גם את הקלטת התפריט הראשי (004)
     const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] : [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
-    const choice = await call.read([
+    // העברה מהדשבורד לאחת מאפשרויות התפריט - בלי להשמיע את התפריט (ראה takeLiveJump)
+    const choice = takeLiveJump(call) || await call.read([
         ...pendingParts,  // הודעת הקלטה ממתינה לתשלום — נשמעת ראשונה, לפני הברכה
         MSG(1),   // 001 - שלום, ברוכים הבאים למערכת התמלול
         MSG(2),   // 002 - קובץ ריק — הודעה זמנית לכניסה
