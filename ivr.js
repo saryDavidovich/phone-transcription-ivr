@@ -42,6 +42,56 @@ function checkInternalSecret(req, res) {
     return true;
 }
 
+// --- לוח חי לדשבורד: מי על הקו ובאיזו שלוחה ---
+// רק רישום בזיכרון. לא משפיע על השיחה: כל שגיאה כאן נבלעת, וה-middleware תמיד ממשיך.
+// כל בקשה מימות מעדכנת את השיחה לפי ApiCallId; hangup=yes מוחק אותה.
+// השלב (stage) נרשם בכניסה לכל תפריט (liveStage). השרת הראשי קורא את הרשימה
+// דרך /internal/live-calls (מוגן ב-INTERNAL_PROXY_SECRET), רק כשהדשבורד פתוח.
+const liveCalls = new Map();
+const LIVE_MAX_AGE_MS = 2 * 60 * 60 * 1000;   // שיחה בלי שום בקשה שעתיים - נמחקת (ניתוק שלא דווח)
+function liveStage(call, stage) {
+    try {
+        const c = liveCalls.get(call && call.ApiCallId);
+        if (c && c.stage !== stage) { c.stage = stage; c.stageSince = Date.now(); }
+    } catch (_) { /* לעולם לא מפריע לשיחה */ }
+}
+app.use((req, res, next) => {
+    try {
+        const q = req.query || {};
+        const id = q.ApiCallId;
+        if (id) {
+            if (q.hangup === 'yes') {
+                liveCalls.delete(id);
+            } else {
+                const now = Date.now();
+                let c = liveCalls.get(id);
+                if (!c) {
+                    c = { phone: String(q.ApiPhone || ''), start: now, stage: 'כניסה', stageSince: now };
+                    liveCalls.set(id, c);
+                }
+                c.ext = String(q.ApiExtension || '');
+                c.path = req.path;
+                c.last = now;
+            }
+        }
+    } catch (_) { /* לעולם לא מפריע לשיחה */ }
+    next();
+});
+app.get('/internal/live-calls', (req, res) => {
+    if (!checkInternalSecret(req, res)) return;
+    const now = Date.now();
+    const calls = [];
+    for (const [id, c] of liveCalls) {
+        if (now - (c.last || c.start) > LIVE_MAX_AGE_MS) { liveCalls.delete(id); continue; }
+        calls.push({ id, phone: c.phone, ext: c.ext, path: c.path, stage: c.stage,
+            seconds: Math.round((now - c.start) / 1000),
+            stage_seconds: Math.round((now - c.stageSince) / 1000),
+            idle_seconds: Math.round((now - (c.last || c.start)) / 1000) });
+    }
+    calls.sort((a, b) => b.seconds - a.seconds);
+    res.json({ calls });
+});
+
 function escapeHtmlForDownloadPage(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -374,6 +424,7 @@ function documentParts(d, index, total) {
 }
 
 async function handleDocuments(call, phone) {
+    liveStage(call, '8 · היסטוריית מסמכים');
     let data = null;
     try {
         data = (await axios.get(`${PYTHON_URL}/api/customer/${phone}/documents`)).data;
@@ -472,6 +523,7 @@ const PHONE_EDIT_FOLDER = '197';   // מספר השלוחה בימות - יש ל
 const EDIT_KEYS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '*'];
 
 async function handlePhoneEditRecording(call, phone) {
+    liveStage(call, 'הקלטה עם עריכה');
     // פעולות עריכה: "סולמית ומיד מספר" (ראה הסבר בגוף הלולאה).
     const segments = [];
     const st = { bold: false, underline: false, square: false, round: false, quote: false, newPara: false };
@@ -961,6 +1013,7 @@ router.get('/phone-edit', async (call) => {
 // (זיהוי תלמיד לפי מספר תלמיד), עם הטלפון האמיתי שהתלמיד רשום תחתיו ב-DB
 // ולא הטלפון שממנו הוא בפועל מתקשר.
 async function presentMainMenu(call, phone) {
+    liveStage(call, 'תפריט ראשי');
     let customer = null;
     try {
         const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
@@ -1088,6 +1141,7 @@ async function presentMainMenu(call, phone) {
 }
 
 async function handleStudentLogin(call, attempt = 1) {
+    liveStage(call, '7 · כניסה עם מספר תלמיד');
     const MAX_ATTEMPTS = 3;
 
     // 095 - הקש את מספר התלמיד שלך ולאחר מכן הקש סולמית (הודעה חדשה - יש להקליט בימות)
@@ -1128,6 +1182,7 @@ async function handleStudentLogin(call, attempt = 1) {
 }
 
 async function handleEmailInstructions(call, phone, customer) {
+    liveStage(call, '5 · הוראות שליחה במייל');
     const hasEmail = !!(customer && customer.email);
 
     // כל לקוח שומע את ההסבר המלא, עם מייל או בלי
@@ -1174,6 +1229,7 @@ async function handleEmailInstructions(call, phone, customer) {
 }
 
 async function handleHandwritingInstructions(call, phone, customer) {
+    liveStage(call, '6 · כתב יד');
     const hasEmail = !!(customer && customer.email);
 
     // כל לקוח שומע את ההסבר המלא, עם מייל או בלי. הקש 2 (חדש) - שמיעת הקוד
@@ -1234,6 +1290,7 @@ async function handleHandwritingInstructions(call, phone, customer) {
 // פעמים שירצה, בכל שיחה - נוצר עצלנית בצד הפייתון בפעם הראשונה שמבקשים
 // אותו (routes/api.py get_customer_fax_code).
 async function handleFaxCode(call, phone) {
+    liveStage(call, '6 · קוד פקס');
     let faxCode = null;
     try {
         const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}/fax-code`);
@@ -1271,6 +1328,7 @@ async function handleFaxCode(call, phone) {
 }
 
 async function handleManagerMessage(call, phone, customer) {
+    liveStage(call, '9 · הודעה למנהל');
     // משריינים מראש ID קצר ורציף (כמו שהיה במקור) - כדי שהמספר שמופיע בשלוחת
     // ההאזנה בימות יתאים בדיוק למספר שמוצג לכל הודעה בממשק הניהול. ה"הגנה"
     // מפני הודעות ריקות לא נעשית יותר ע"י מניעת שריון (זה שבר את המספור),
@@ -1346,6 +1404,7 @@ async function handleManagerMessage(call, phone, customer) {
 }
 
 async function handleRecording(call, phone, customer) {
+    liveStage(call, '1 · הקלטה לתמלול');
     const balance = customer ? parseFloat(customer.balance || 0) : 0;
 
     let priceBasic = 0.90;
@@ -1525,6 +1584,7 @@ async function handleRecording(call, phone, customer) {
 }
 
 async function handleOptions(call, phone) {
+    liveStage(call, '2 · אפשרויות');
     // 027 - לטעינת ארנק הקש 1, לעדכון פרטים הקש 2, לשמיעת מחירון הקש 3, לחזרה הקש 0
     const choice = await call.read([MSG(27)], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
@@ -1540,6 +1600,7 @@ async function handleOptions(call, phone) {
 }
 
 async function handlePriceList(call, phone) {
+    liveStage(call, '2 · מחירון');
     // 092 - מחירון קצר, לחזרה לתפריט הראשי הקש 0
     await call.read([
         MSG(92)
@@ -1549,6 +1610,7 @@ async function handlePriceList(call, phone) {
 }
 
 async function handleTopUp(call, phone) {
+    liveStage(call, '2 · טעינת ארנק');
     await call.id_list_message([
         MSG(82),  // 082 - קובץ ריק — הכרזת מבצע זמנית (להחליף לפי צורך)
         MSG(7),   // 007 - קובץ ריק — הודעה זמנית לפני סליקה
@@ -1558,6 +1620,7 @@ async function handleTopUp(call, phone) {
 }
 
 async function handleUpdateDetails(call, phone) {
+    liveStage(call, '2 · עדכון פרטים');
     let customer = null;
     try {
         const res = await axios.get(`${PYTHON_URL}/api/customer/${phone}`);
@@ -1635,6 +1698,7 @@ async function handleUpdateDetails(call, phone) {
 }
 
 async function handleDefaultSettings(call, phone, customer) {
+    liveStage(call, '2 · הגדרות ברירת מחדל');
     // טען נתונים עדכניים מהשרת
     let currentDefaults = {};
     try {
@@ -1734,6 +1798,7 @@ async function handleDefaultSettings(call, phone, customer) {
 }
 
 async function handleExplainMenu(call, phone, customer) {
+    liveStage(call, '3 · הסבר על המערכת');
     // 006 - הסבר מערכת, 088 - תנאי שימוש
     const choice = await call.read([
         MSG(88), // להסבר על המערכת הקש 1, לתנאי שימוש הקש 2
@@ -1753,6 +1818,7 @@ async function handleExplainMenu(call, phone, customer) {
 }
 
 async function handleQuickRecord(call, phone, customer) {
+    liveStage(call, '4 · הקלטה מהירה');
     const balance = customer ? parseFloat(customer.balance || 0) : 0;
 
     let priceBasic = 0.90;
@@ -1814,6 +1880,7 @@ async function handleQuickRecord(call, phone, customer) {
 }
 
 async function handleAdminMenu(call) {
+    liveStage(call, '0 · תפריט מנהל');
     // 094 - לשמיעת הודעות הקש 1, למעבר לשלוחה 59 הקש 2, להקלטה עם עריכה הקש 3 (יש להקליט מחדש)
     const choice = await call.read([MSG(94)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
 
@@ -1830,6 +1897,7 @@ async function handleAdminMenu(call) {
 }
 
 async function handleAdminMessages(call) {
+    liveStage(call, '0 · הודעות מנהל');
     // 034 - הקש את מספר ההודעה ולסיום הקש סולמית
     const msgId = await call.read([MSG(34)], 'tap', { max_digits: 10, terminate_keys: ['#'] });
 
