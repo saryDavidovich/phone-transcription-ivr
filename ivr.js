@@ -55,7 +55,7 @@ const liveCalls = new Map();
 const liveActions = new Map();   // callId -> { type: 'menu'|'folder'|'hangup', target, at }
 const liveJumps = new Map();     // callId -> ספרה בתפריט הראשי (אחרי העברה לתפריט)
 const LIVE_MAX_AGE_MS = 2 * 60 * 60 * 1000;
-const LIVE_NO_TRANSFER = ['1 · הקלטה לתמלול', '4 · הקלטה מהירה', 'הקלטה עם עריכה', '9 · הודעה למנהל'];
+const LIVE_NO_TRANSFER = ['1 · הקלטה לתמלול', '4 · הקלטה מהירה', 'הקלטה עם עריכה', '9 · הודעה למנהל', 'אקסל · הקלטה למילוי טבלה'];
 const MSG_DESC = (() => {
     const m = {};
     try {
@@ -506,7 +506,9 @@ async function sendRecordingOnHangup(phone, customer, recPath, callId, opts) {
             delivered_to: to,
             transcription_tier: opts.transcriptionTier,
             language: opts.language,
-            output_language: opts.outputLanguage
+            output_language: opts.outputLanguage,
+            excel_template_id: opts.excelTemplateId,
+            excel_mode: opts.excelMode
         });
         console.log(`hangup after recording: sent ${recPath} for transcription`);
     } catch (err) {
@@ -1590,7 +1592,16 @@ async function handleRecording(call, phone, customer) {
     }
 
     // 015 - לתמלול רגיל הקש 1 לתמלול מקצועי הקש 2, 083 - הכרזת מחיר, ואז הלקוח בוחר
-    const tierChoice = await call.read([MSG(15), MSG(83)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    // 3 - טבלאות אקסל: בשלב הבדיקות רק למנהל (לקוחות לא שומעים ולא יכולים להקיש 3).
+    // כשההודעות יוקלטו - להסיר את התנאי ולעדכן את הודעה 015.
+    const excelOpen = phone === '0527134491';
+    const tierChoice = await call.read(
+        excelOpen ? [MSG(15), MSG(83), TTS('ליצירת טבלאות אקסל הקישו 3')] : [MSG(15), MSG(83)],
+        'tap', { max_digits: 1, digits_allowed: excelOpen ? [1, 2, 3] : [1, 2] });
+    if (tierChoice === '3' && excelOpen) {
+        await handleExcel(call, phone, customer);
+        return;
+    }
 
     const transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
 
@@ -1706,6 +1717,232 @@ async function handleRecording(call, phone, customer) {
     await call.id_list_message([
         // 026 - ההקלטה התקבלה, התמלול ישלח אליך בקרוב, שיחה טובה
         MSG(26),
+        { type: 'go_to_folder', data: '/' }
+    ]);
+}
+
+// ---------------------------------------------------------------------------
+// טבלאות אקסל מהקלטה (שלוחה 1 ← 3). בינתיים כל ההודעות בהקראה ממוחשבת של ימות (TTS);
+// שמות התבניות מושמעים בקול הלקוח (הקלטה בתיקייה /excel_names).
+// השרת: /api/excel/templates/<phone>, /api/excel/columns, /api/excel/template/save|delete,
+// והקלטת המילוי נשלחת ל-/api/transcribe עם transcription_tier='excel'.
+// ---------------------------------------------------------------------------
+// טקסט להקראה ממוחשבת - ימות לא מקבלים את התווים . - " ' & | בטקסט
+function TTS(text) {
+    return { type: 'text', data: String(text || '').replace(/[.\-"'&|]/g, ' ').replace(/\s+/g, ' ').trim() || ' ' };
+}
+
+function excelNamePart(t) {
+    return t.name_audio ? { type: 'file', data: t.name_audio } : TTS(t.name || `תבנית ${t.idx}`);
+}
+
+async function excelTemplates(phone) {
+    try {
+        const r = await axios.get(`${PYTHON_URL}/api/excel/templates/${phone}`);
+        return (r.data && r.data.templates) || [];
+    } catch (e) {
+        console.error('excel templates error:', e.message);
+        return null;
+    }
+}
+
+async function handleExcel(call, phone, customer) {
+    liveStage(call, 'טבלאות אקסל');
+    let price = 1.5;
+    try {
+        const st = await axios.get(`${PYTHON_URL}/api/settings`);
+        price = parseFloat(st.data.price_per_20min_excel || 1.5);
+    } catch (e) { /* ברירת מחדל */ }
+    const balance = customer ? parseFloat(customer.balance || 0) : 0;
+    if (balance < price) {
+        await call.id_list_message([
+            TTS('מצטערים, היתרה בארנק אינה מספיקה ליצירת טבלה. לטעינת ארנק חזרו לתפריט הראשי והקישו 2'),
+            { type: 'go_to_folder', data: '/' }
+        ]);
+        return;
+    }
+
+    while (true) {
+        const templates = await excelTemplates(phone);
+        if (templates === null) {
+            await call.id_list_message([TTS('אירעה תקלה, נסו שוב מאוחר יותר'), { type: 'go_to_folder', data: '/' }]);
+            return;
+        }
+        const parts = [];
+        if (!templates.length) parts.push(TTS('אין לכם עדיין תבניות'));
+        parts.push(TTS('ליצירת תבנית חדשה הקישו 0'));
+        for (const t of templates) {
+            parts.push(TTS('לתבנית'), excelNamePart(t), TTS(`הקישו ${t.idx}`));
+        }
+        const allowed = [0, ...templates.map((t) => t.idx)];
+        const choice = await call.read(parts, 'tap', { max_digits: 1, digits_allowed: allowed });
+        if (choice === '0') {
+            if (templates.length >= 9) {
+                await call.id_list_message([TTS('ניתן לשמור עד 9 תבניות. כדי ליצור תבנית חדשה יש למחוק תבנית קיימת')], { prependToNextAction: true });
+                continue;
+            }
+            const created = await excelEditTemplate(call, phone, null);
+            if (created) {
+                const done = await excelTemplateMenu(call, phone, customer, created);
+                if (done) return;
+            }
+            continue;
+        }
+        const t = templates.find((x) => String(x.idx) === String(choice));
+        if (!t) continue;
+        const done = await excelTemplateMenu(call, phone, customer, t);
+        if (done) return;
+    }
+}
+
+// יצירה (existing=null) או עריכה של תבנית: שם בקול, עמודות בקול, הקראת העמודות ואישור
+async function excelEditTemplate(call, phone, existing) {
+    liveStage(call, existing ? 'אקסל · עריכת תבנית' : 'אקסל · תבנית חדשה');
+    const namePath = await call.read([TTS('אמרו בקול ברור את שם התבנית, ובסיום הקישו סולמית')], 'record', {
+        no_confirm_menu: true, save_on_hangup: false, path: '/excel_names'
+    });
+    const nameAudio = (typeof namePath === 'string' && namePath) ? namePath.replace(/\.wav$/i, '') : '';
+
+    let columns = [];
+    for (let attempt = 1; attempt <= 3 && !columns.length; attempt++) {
+        const colPath = await call.read([TTS('אמרו בקול ברור את העמודות לפי הסדר. לדוגמה: 1 שם, 2 טלפון, 3 כתובת, 4 סכום. בסיום הקישו סולמית')], 'record', {
+            no_confirm_menu: true, save_on_hangup: false, path: '/tmp_excel'
+        });
+        try {
+            const r = await axios.post(`${PYTHON_URL}/api/excel/columns`, { rec_url: yemotDownloadUrl(colPath) }, { timeout: 60000 });
+            columns = (r.data && r.data.columns) || [];
+        } catch (e) {
+            if (isHangup(e)) throw e;
+            console.error('excel columns error:', e.message);
+            columns = [];
+        }
+        if (!columns.length) {
+            await call.id_list_message([TTS('לא הצלחנו לזהות את העמודות, נסו שוב')], { prependToNextAction: true });
+            continue;
+        }
+        const read = [TTS('העמודות הן')];
+        columns.forEach((c, i) => read.push(TTS(`${i + 1} ${c}`)));
+        read.push(TTS('לאישור הקישו 1, להקלטה מחדש של העמודות הקישו 2'));
+        const ok = await call.read(read, 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        if (ok !== '1') { columns = []; attempt = 0; }
+    }
+    if (!columns.length) {
+        await call.id_list_message([TTS('התבנית לא נשמרה')], { prependToNextAction: true });
+        return null;
+    }
+    try {
+        const r = await axios.post(`${PYTHON_URL}/api/excel/template/save`, {
+            phone, template_id: existing ? existing.id : undefined, columns,
+            name_audio: nameAudio, name_rec_url: namePath ? yemotDownloadUrl(namePath) : ''
+        });
+        await call.id_list_message([TTS('התבנית נשמרה')], { prependToNextAction: true });
+        return r.data.template;
+    } catch (e) {
+        if (isHangup(e)) throw e;
+        console.error('excel save error:', e.message);
+        await call.id_list_message([TTS('אירעה תקלה, התבנית לא נשמרה')], { prependToNextAction: true });
+        return null;
+    }
+}
+
+// תפריט תבנית. מחזיר true כשהשיחה עברה למקום אחר (הקלטה נשלחה), false - חזרה לרשימת התבניות
+async function excelTemplateMenu(call, phone, customer, t) {
+    while (true) {
+        liveStage(call, 'אקסל · תפריט תבנית');
+        const choice = await call.read([
+            TTS('לתבנית'), excelNamePart(t),
+            TTS('להקלטה למילוי טבלה הקישו 1, לעריכת התבנית הקישו 2, למחיקת התבנית הקישו 3, לחזרה הקישו 0')
+        ], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
+
+        if (choice === '0') return false;
+        if (choice === '2') {
+            const edited = await excelEditTemplate(call, phone, t);
+            if (edited) t = edited;
+            continue;
+        }
+        if (choice === '3') {
+            const sure = await call.read([TTS('שימו לב, התבנית והטבלה שלה יימחקו. למחיקה הקישו 1, לביטול הקישו 2')],
+                'tap', { max_digits: 1, digits_allowed: [1, 2] });
+            if (sure !== '1') continue;
+            try {
+                await axios.post(`${PYTHON_URL}/api/excel/template/delete`, { phone, template_id: t.id });
+                await call.id_list_message([TTS('התבנית נמחקה')], { prependToNextAction: true });
+            } catch (e) {
+                if (isHangup(e)) throw e;
+                await call.id_list_message([TTS('אירעה תקלה במחיקה')], { prependToNextAction: true });
+            }
+            return false;
+        }
+
+        // 1 - הקלטה למילוי טבלה
+        let mode = 'new';
+        if ((t.rows_count || 0) > 0) {
+            const m = await call.read([
+                TTS(`בטבלה הקיימת יש ${t.rows_count} שורות. להמשך הטבלה הקיימת הקישו 1, להתחלת טבלה חדשה הקישו 2`)
+            ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+            if (m === '2') {
+                const sure = await call.read([
+                    TTS('שימו לב, התחלת טבלה חדשה תמחק את הטבלה הקיימת, ולא ניתן יהיה להמשיך אותה אחר כך. לאישור הקישו 1, לחזרה הקישו 2')
+                ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+                if (sure !== '1') continue;
+                mode = 'new';
+            } else {
+                mode = 'continue';
+            }
+        }
+        await excelRecord(call, phone, customer, t, mode);
+        return true;
+    }
+}
+
+async function excelRecord(call, phone, customer, t, mode) {
+    liveStage(call, 'אקסל · הקלטה למילוי טבלה');
+    await call.id_list_message([
+        TTS('הקריאו את הנתונים שורה אחרי שורה, בכל סדר שנוח לכם. בסיום הקישו סולמית')
+    ], { prependToNextAction: true });
+    const opts = { transcriptionTier: 'excel', language: 'he', outputLanguage: 'he', excelTemplateId: t.id, excelMode: mode };
+    const recPath = await recordWithMenu(call, phone, customer, opts);
+
+    // יעד המשלוח - כמו בהקלטה רגילה (handleRecording)
+    let deliveryMethod = customer ? customer.delivery_method : '';
+    let deliveredTo = '';
+    if (deliveryMethod === 'fax') deliveredTo = customer ? (customer.fax || '') : '';
+    else if (deliveryMethod === 'email') deliveredTo = customer ? (customer.email || '') : '';
+    if (!deliveredTo) {
+        // 024 - לשליחה למייל הקש 1, לשליחה לפקס הקש 2
+        const deliveryChoice = await call.read([MSG(24)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        if (deliveryChoice === '1') {
+            const email = await getEmail(call);
+            deliveryMethod = 'email';
+            deliveredTo = email;
+            try { await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' }); } catch (e) {}
+        } else {
+            // 025 - הקש את מספר הפקס שלך, ולאחר מכן הקש סולמית
+            const fax = await call.read([MSG(25)], 'tap', { max_digits: 15, terminate_keys: ['#'] });
+            deliveryMethod = 'fax';
+            deliveredTo = fax;
+            try { await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax, delivery_method: 'fax' }); } catch (e) {}
+        }
+    }
+
+    try {
+        await axios.post(`${PYTHON_URL}/api/transcribe`, {
+            phone,
+            rec_url: yemotDownloadUrl(recPath),
+            call_id: call.ApiCallId,
+            delivery_method: deliveryMethod,
+            delivered_to: deliveredTo,
+            transcription_tier: 'excel',
+            language: 'he',
+            output_language: 'he',
+            excel_template_id: t.id,
+            excel_mode: mode
+        });
+    } catch (e) {
+        console.error('excel transcribe error:', e.message);
+    }
+    await call.id_list_message([
+        TTS('ההקלטה התקבלה, הטבלה תישלח אליכם בקרוב. שיחה טובה'),
         { type: 'go_to_folder', data: '/' }
     ]);
 }
