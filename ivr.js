@@ -1811,9 +1811,11 @@ async function excelEditTemplate(call, phone, existing) {
         try {
             const r = await axios.post(`${PYTHON_URL}/api/excel/columns`, { rec_url: yemotDownloadUrl(colPath) }, { timeout: 60000 });
             columns = (r.data && r.data.columns) || [];
+            console.log(`excel columns: ${colPath} -> ${JSON.stringify(columns)}`);
         } catch (e) {
             if (isHangup(e)) throw e;
-            console.error('excel columns error:', e.message);
+            console.error('excel columns error:', e.response ? e.response.status : '', e.message,
+                e.response && e.response.data ? JSON.stringify(e.response.data).slice(0, 200) : '');
             columns = [];
         }
         if (!columns.length) {
