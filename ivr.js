@@ -1112,10 +1112,21 @@ async function getDomainAndConfirmEmail(call, localPart, mode) {
     return await getEmailByKeypad(call);
 }
 
-async function getEmail(call) {
-    // 057 - למצב הקלטה הקש 1, למצב כתיבה הקש 2
-    const modeChoice = await call.read([MSG(57)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+// ערך מיוחד ש-getEmail מחזירה כשהלקוח בחר 3 = "השארת הודעה לנציג שיכניס את המייל"
+const EMAIL_BY_HUMAN = Symbol('email-by-human');
 
+async function getEmail(call, opts = {}) {
+    // 057 - למצב הקלטה הקש 1, למצב כתיבה הקש 2
+    // + (רק בעדכון פרטים) להשארת הודעה לנציג שיכניס את המייל הקש 3 - בינתיים בהקראה ממוחשבת
+    const prompt = [MSG(57)];
+    const allowed = [1, 2];
+    if (opts.allowHuman) {
+        prompt.push(TTS('להשארת הודעה לנציג שיכניס עבורכם את כתובת המייל הקישו 3'));
+        allowed.push(3);
+    }
+    const modeChoice = await call.read(prompt, 'tap', { max_digits: 1, digits_allowed: allowed });
+
+    if (modeChoice === '3' && opts.allowHuman) return EMAIL_BY_HUMAN;
     if (modeChoice === '1') {
         return await getEmailByVoice(call);
     } else {
@@ -1985,6 +1996,56 @@ async function handleTopUp(call, phone) {
     ]);
 }
 
+// עדכון פרטים ← עדכון מייל ← 3: הלקוח מקליט את כתובת המייל בקולו, וזה נכנס
+// ל"הודעות למנהל" עם סימון "בקשה לעדכון מייל" (source=email_request). נציג
+// שומע בממשק, מכניס את המייל ללקוח. אותו מספור ואותה תיקייה כמו שלוחה 9
+// (/manager_messages/<id>), כדי שמספר ההודעה בימות יתאים למספר בממשק.
+// בינתיים ההנחיות בהקראה ממוחשבת (TTS), עד שיוקלטו קבצים.
+async function handleEmailRequestMessage(call, phone, customer) {
+    liveStage(call, '2 · הודעה לנציג - עדכון מייל');
+    let msgId = call.ApiCallId;
+    try {
+        const idRes = await axios.post(`${PYTHON_URL}/api/manager-message-reserve`, { phone, call_id: call.ApiCallId });
+        msgId = idRes.data.id;
+    } catch (e) {
+        console.error('email-request reserve error:', e.message);
+    }
+
+    const recPath = await call.read([
+        TTS('אמרו לאחר הצליל את כתובת המייל שלכם באופן ברור, ואם אפשר גם אותיות באנגלית אחת אחת. לסיום הקישו סולמית'),
+    ], 'record', {
+        no_confirm_menu: true,
+        save_on_hangup: false,
+        path: '/manager_messages',
+        file_name: String(msgId)
+    });
+
+    if (!recPath) {
+        console.log('handleEmailRequestMessage: empty recording, not saving');
+        return;
+    }
+    const cleanPath = recPath.startsWith('/') ? recPath : `/${recPath}`;
+    const fullRecUrl = recPath.startsWith('http') ? recPath
+        : `https://www.call2all.co.il/ym/api/DownloadFile?token=${process.env.YEMOT_TOKEN}&path=ivr2:${cleanPath}`;
+    try {
+        await axios.post(`${PYTHON_URL}/api/manager-message`, {
+            phone,
+            rec_url: fullRecUrl,
+            rec_path: recPath,
+            call_id: call.ApiCallId,
+            id: typeof msgId === 'number' ? msgId : undefined,
+            source: 'email_request',
+            email: customer ? (customer.email || '') : '',
+            fax: customer ? (customer.fax || '') : '',
+            delivery_method: customer ? (customer.delivery_method || '') : '',
+            name: customer ? (customer.name || '') : ''
+        });
+    } catch (e) {
+        console.error('email-request message error:', e.message);
+    }
+    await call.id_list_message([TTS('הודעתכם התקבלה, נציג יעדכן את כתובת המייל בהקדם')], { prependToNextAction: true });
+}
+
 async function handleUpdateDetails(call, phone) {
     liveStage(call, '2 · עדכון פרטים');
     let customer = null;
@@ -2012,7 +2073,11 @@ async function handleUpdateDetails(call, phone) {
     ], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3, 4] });
 
     if (choice === '1') {
-        const email = await getEmail(call);
+        const email = await getEmail(call, { allowHuman: true });
+        if (email === EMAIL_BY_HUMAN) {
+            await handleEmailRequestMessage(call, phone, customer);
+            return await handleUpdateDetails(call, phone);
+        }
         try {
             await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' });
         } catch (e) {}
