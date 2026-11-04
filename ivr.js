@@ -1900,7 +1900,7 @@ async function excelTemplateMenu(call, phone, customer, t) {
 async function excelRecord(call, phone, customer, t, mode) {
     liveStage(call, 'אקסל · הקלטה למילוי טבלה');
     await call.id_list_message([
-        TTS('הקריאו את הנתונים שורה אחרי שורה, בכל סדר שנוח לכם. בסיום הקישו סולמית')
+        TTS('הקריאו את הנתונים שורה אחרי שורה. בסוף כל שורה אמרו: שורה הבאה. בסיום הקישו סולמית')
     ], { prependToNextAction: true });
     const opts = { transcriptionTier: 'excel', language: 'he', outputLanguage: 'he', excelTemplateId: t.id, excelMode: mode };
     const recPath = await recordWithMenu(call, phone, customer, opts);
