@@ -10,6 +10,23 @@ app.use(express.json({ limit: '2mb' }));
 
 const PYTHON_URL = process.env.PYTHON_URL || 'https://web-production-90272.up.railway.app';
 
+// חיבור פתוח (keep-alive): במקום לפתוח חיבור מאובטח חדש בכל פנייה לשרת הפייתון/לימות,
+// ממשיכים להשתמש באותו חיבור. חוסך זמן בכל שלב בשיחה, בלי עלות.
+const http = require('http');
+const https = require('https');
+axios.defaults.httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
+axios.defaults.httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
+
+// MEASURE-TEMP (מדידה זמנית - למחוק אחרי ההחלטה על מעבר שרתים): זמן כל פנייה לשרת הפייתון
+axios.interceptors.request.use((config) => { config.__t0 = Date.now(); return config; });
+axios.interceptors.response.use((res) => {
+    const c = res.config || {};
+    if (c.__t0 && String(c.url || '').startsWith(PYTHON_URL)) {
+        console.log(`⏱ py ${String(c.url).slice(PYTHON_URL.length).split('?')[0]} ${Date.now() - c.__t0}ms`);
+    }
+    return res;
+}, (err) => Promise.reject(err));
+
 // --- מפתח משותף מול שרת הפייתון (API_SHARED_SECRET) ---
 // כשהמשתנה מוגדר גם כאן וגם בשרת הפייתון, כל קריאה לשרת הפייתון נושאת אותו בכותרת
 // X-API-Key, ושרת הפייתון דוחה כל קריאה ל-/api בלי המפתח. ההוספה נעשית *רק* לכתובות
@@ -118,6 +135,19 @@ function liveAbandonFlow(id) {
         }
     } catch (e) { console.error('liveAbandonFlow:', e.message); }
 }
+// MEASURE-TEMP (מדידה זמנית - למחוק אחרי ההחלטה על מעבר שרתים): כמה זמן לקח לנו לענות
+// לכל בקשה של ימות (מרגע שהגיעה ועד שנשלחה התשובה) - בלי זמן הרשת מישראל ובחזרה.
+app.use((req, res, next) => {
+    const t0 = Date.now();
+    const q = req.query || {};
+    if (q.ApiCallId) {
+        res.on('finish', () => {
+            const c = liveCalls.get(q.ApiCallId);
+            console.log(`⏱ ivr ${String(q.ApiCallId).slice(0, 8)} ${q.hangup === 'yes' ? 'ניתוק' : (c ? c.stage : '')} ${Date.now() - t0}ms`);
+        });
+    }
+    next();
+});
 app.use((req, res, next) => {
     try {
         const q = req.query || {};
