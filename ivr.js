@@ -135,6 +135,8 @@ function liveAbandonFlow(id) {
         }
     } catch (e) { console.error('liveAbandonFlow:', e.message); }
 }
+app.use((req, res, next) => { refreshSysMsgs(false); next(); });   // רשימת ההודעות (SAY) - ברקע
+
 // MEASURE-TEMP (מדידה זמנית - למחוק אחרי ההחלטה על מעבר שרתים): כמה זמן לקח לנו לענות
 // לכל בקשה של ימות (מרגע שהגיעה ועד שנשלחה התשובה) - בלי זמן הרשת מישראל ובחזרה.
 app.use((req, res, next) => {
@@ -1151,7 +1153,7 @@ async function getEmail(call, opts = {}) {
     const prompt = [MSG(57)];
     const allowed = [1, 2];
     if (opts.allowHuman) {
-        prompt.push(TTS('להשארת הודעה לנציג שיכניס עבורכם את כתובת המייל הקישו 3'));
+        prompt.push(SAY(200, 'להשארת הודעה לנציג שיכניס עבורכם את כתובת המייל הקישו 3'));
         allowed.push(3);
     }
     const modeChoice = await call.read(prompt, 'tap', { max_digits: 1, digits_allowed: allowed });
@@ -1353,7 +1355,7 @@ async function playVoiceMessagesOnce(call, phone, msgs, lead) {
             } catch (e) { console.error('voice heard error:', e.message); }
             return true;
         }
-        prompt = [TTS('יש להאזין להודעה עד סופה'), ...parts];
+        prompt = [SAY(201, 'יש להאזין להודעה עד סופה'), ...parts];
     }
     return false;
 }
@@ -1363,7 +1365,7 @@ async function replayVoiceMessages(call, msgs) {
     liveStage(call, '9 · שמיעה חוזרת של הודעות');
     const parts = msgs.map(voiceMessagePart);
     for (;;) {
-        const c = await call.read([...parts, TTS('לשמיעה חוזרת הקישו 1, לחזרה לתפריט הראשי הקישו 0')],
+        const c = await call.read([...parts, SAY(202, 'לשמיעה חוזרת הקישו 1, לחזרה לתפריט הראשי הקישו 0')],
             'tap', { max_digits: 1, digits_allowed: [0, 1] });
         if (c !== '1') break;
     }
@@ -1568,7 +1570,7 @@ async function handleManagerMessage(call, phone, customer) {
         console.error('voice replay error:', e.message);
     }
     if (voiceReplay.length) {
-        const c = await call.read([TTS('לשמיעה חוזרת של ההודעות מהמערכת הקישו 1, להשארת הודעה למנהל הקישו 2')],
+        const c = await call.read([SAY(203, 'לשמיעה חוזרת של ההודעות מהמערכת הקישו 1, להשארת הודעה למנהל הקישו 2')],
             'tap', { max_digits: 1, digits_allowed: [1, 2] });
         if (c === '1') return await replayVoiceMessages(call, voiceReplay);
         liveStage(call, '9 · הודעה למנהל');
@@ -1719,10 +1721,10 @@ async function handleRecording(call, phone, customer) {
     const excelAnnounce = phone === '0527134491';
     // 083 - הכרזת המחיר (ל-20 דקות). לקוח בחיוב לפי 5 דקות שומע את המחיר שלו בהקראה ממוחשבת
     const priceAnnounce = per5
-        ? TTS(`המחיר לכל 5 דקות: תמלול רגיל ${moneyText(priceBasic)}, תמלול מקצועי ${moneyText(pricePremium)}`)
-        : MSG(83);
+        ? [SAY(204, 'המחיר לכל 5 דקות: תמלול רגיל'), TTS(moneyText(priceBasic)), SAY(205, 'תמלול מקצועי'), TTS(moneyText(pricePremium))]
+        : [MSG(83)];
     const tierChoice = await call.read(
-        excelAnnounce ? [MSG(15), priceAnnounce, TTS('ליצירת טבלאות אקסל הקישו 3')] : [MSG(15), priceAnnounce],
+        excelAnnounce ? [MSG(15), ...priceAnnounce, SAY(206, 'ליצירת טבלאות אקסל הקישו 3')] : [MSG(15), ...priceAnnounce],
         'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
     if (tierChoice === '3') {
         await handleExcel(call, phone, customer);
@@ -1854,6 +1856,27 @@ async function handleRecording(call, phone, customer) {
 // והקלטת המילוי נשלחת ל-/api/transcribe עם transcription_tier='excel'.
 // ---------------------------------------------------------------------------
 // טקסט להקראה ממוחשבת - ימות לא מקבלים את התווים . - " ' & | בטקסט
+// --- הודעות שעדיין בהקראה ממוחשבת: SAY(מספר, נוסח) ---
+// ⚠ כל הודעה חדשה - להוסיף גם לרשימה בשרת (phone-transcription: services/message_catalog.py).
+// כל עוד לא הועלתה הקלטה בדף "קריין והודעות מערכת" - ימות מקריאים את הנוסח העדכני מהרשימה
+// (כולל עריכות בממשק); אחרי העלאה - מושמעת ההקלטה /הודעות מערכת/NNN/000. מתעדכן כל דקה.
+let sysMsgs = {};
+let sysMsgsAt = 0;
+async function refreshSysMsgs(force) {
+    if (!force && Date.now() - sysMsgsAt < 60000) return;
+    sysMsgsAt = Date.now();
+    try {
+        sysMsgs = (await axios.get(`${PYTHON_URL}/api/system-messages`, { timeout: 5000 })).data || {};
+    } catch (e) {
+        console.error('system messages refresh error:', e.message);
+    }
+}
+function SAY(num, fallback) {
+    const m = sysMsgs[String(num)];
+    if (m && m.r) return MSG(num);
+    return TTS((m && m.t) || fallback);
+}
+
 // סכום להקראה: "25 אגורות" / "שקל ו 50 אגורות" / "2 שקל"
 function moneyText(v) {
     const total = Math.round((parseFloat(v) || 0) * 100);
@@ -1892,7 +1915,7 @@ async function handleExcel(call, phone, customer) {
     const balance = customer ? parseFloat(customer.balance || 0) : 0;
     if (balance < price) {
         await call.id_list_message([
-            TTS('מצטערים, היתרה בארנק אינה מספיקה ליצירת טבלה. לטעינת ארנק חזרו לתפריט הראשי והקישו 2'),
+            SAY(207, 'מצטערים, היתרה בארנק אינה מספיקה ליצירת טבלה. לטעינת ארנק חזרו לתפריט הראשי והקישו 2'),
             { type: 'go_to_folder', data: '/' }
         ]);
         return;
@@ -1901,20 +1924,20 @@ async function handleExcel(call, phone, customer) {
     while (true) {
         const templates = await excelTemplates(phone);
         if (templates === null) {
-            await call.id_list_message([TTS('אירעה תקלה, נסו שוב מאוחר יותר'), { type: 'go_to_folder', data: '/' }]);
+            await call.id_list_message([SAY(208, 'אירעה תקלה, נסו שוב מאוחר יותר'), { type: 'go_to_folder', data: '/' }]);
             return;
         }
         const parts = [];
-        if (!templates.length) parts.push(TTS('אין לכם עדיין תבניות'));
-        parts.push(TTS('ליצירת תבנית חדשה הקישו 0'));
+        if (!templates.length) parts.push(SAY(209, 'אין לכם עדיין תבניות'));
+        parts.push(SAY(210, 'ליצירת תבנית חדשה הקישו 0'));
         for (const t of templates) {
-            parts.push(TTS('לתבנית'), excelNamePart(t), TTS(`הקישו ${t.idx}`));
+            parts.push(SAY(231, 'לתבנית'), excelNamePart(t), TTS(`הקישו ${t.idx}`));
         }
         const allowed = [0, ...templates.map((t) => t.idx)];
         const choice = await call.read(parts, 'tap', { max_digits: 1, digits_allowed: allowed });
         if (choice === '0') {
             if (templates.length >= 9) {
-                await call.id_list_message([TTS('ניתן לשמור עד 9 תבניות. כדי ליצור תבנית חדשה יש למחוק תבנית קיימת')], { prependToNextAction: true });
+                await call.id_list_message([SAY(211, 'ניתן לשמור עד 9 תבניות. כדי ליצור תבנית חדשה יש למחוק תבנית קיימת')], { prependToNextAction: true });
                 continue;
             }
             const created = await excelEditTemplate(call, phone, null);
@@ -1934,14 +1957,14 @@ async function handleExcel(call, phone, customer) {
 // יצירה (existing=null) או עריכה של תבנית: שם בקול, עמודות בקול, הקראת העמודות ואישור
 async function excelEditTemplate(call, phone, existing) {
     liveStage(call, existing ? 'אקסל · עריכת תבנית' : 'אקסל · תבנית חדשה');
-    const namePath = await call.read([TTS('אמרו בקול ברור את שם התבנית, ובסיום הקישו סולמית')], 'record', {
+    const namePath = await call.read([SAY(212, 'אמרו בקול ברור את שם התבנית, ובסיום הקישו סולמית')], 'record', {
         no_confirm_menu: true, save_on_hangup: false, path: '/excel_names'
     });
     const nameAudio = (typeof namePath === 'string' && namePath) ? namePath.replace(/\.wav$/i, '') : '';
 
     let columns = [];
     for (let attempt = 1; attempt <= 3 && !columns.length; attempt++) {
-        const colPath = await call.read([TTS('אמרו בקול ברור את העמודות לפי הסדר. לדוגמה: 1 שם, 2 טלפון, 3 כתובת, 4 סכום. בסיום הקישו סולמית')], 'record', {
+        const colPath = await call.read([SAY(213, 'אמרו בקול ברור את העמודות לפי הסדר. לדוגמה: 1 שם, 2 טלפון, 3 כתובת, 4 סכום. בסיום הקישו סולמית')], 'record', {
             no_confirm_menu: true, save_on_hangup: false, path: '/tmp_excel'
         });
         try {
@@ -1955,17 +1978,17 @@ async function excelEditTemplate(call, phone, existing) {
             columns = [];
         }
         if (!columns.length) {
-            await call.id_list_message([TTS('לא הצלחנו לזהות את העמודות, נסו שוב')], { prependToNextAction: true });
+            await call.id_list_message([SAY(214, 'לא הצלחנו לזהות את העמודות, נסו שוב')], { prependToNextAction: true });
             continue;
         }
-        const read = [TTS('העמודות הן')];
+        const read = [SAY(215, 'העמודות הן')];
         columns.forEach((c, i) => read.push(TTS(`${i + 1} ${c}`)));
-        read.push(TTS('לאישור הקישו 1, להקלטה מחדש של העמודות הקישו 2'));
+        read.push(SAY(216, 'לאישור הקישו 1, להקלטה מחדש של העמודות הקישו 2'));
         const ok = await call.read(read, 'tap', { max_digits: 1, digits_allowed: [1, 2] });
         if (ok !== '1') { columns = []; attempt = 0; }
     }
     if (!columns.length) {
-        await call.id_list_message([TTS('התבנית לא נשמרה')], { prependToNextAction: true });
+        await call.id_list_message([SAY(217, 'התבנית לא נשמרה')], { prependToNextAction: true });
         return null;
     }
     try {
@@ -1973,12 +1996,12 @@ async function excelEditTemplate(call, phone, existing) {
             phone, template_id: existing ? existing.id : undefined, columns,
             name_audio: nameAudio, name_rec_url: namePath ? yemotDownloadUrl(namePath) : ''
         });
-        await call.id_list_message([TTS('התבנית נשמרה')], { prependToNextAction: true });
+        await call.id_list_message([SAY(218, 'התבנית נשמרה')], { prependToNextAction: true });
         return r.data.template;
     } catch (e) {
         if (isHangup(e)) throw e;
         console.error('excel save error:', e.message);
-        await call.id_list_message([TTS('אירעה תקלה, התבנית לא נשמרה')], { prependToNextAction: true });
+        await call.id_list_message([SAY(219, 'אירעה תקלה, התבנית לא נשמרה')], { prependToNextAction: true });
         return null;
     }
 }
@@ -1988,8 +2011,8 @@ async function excelTemplateMenu(call, phone, customer, t) {
     while (true) {
         liveStage(call, 'אקסל · תפריט תבנית');
         const choice = await call.read([
-            TTS('לתבנית'), excelNamePart(t),
-            TTS('להקלטה למילוי טבלה הקישו 1, לעריכת התבנית הקישו 2, למחיקת התבנית הקישו 3, לחזרה הקישו 0')
+            SAY(231, 'לתבנית'), excelNamePart(t),
+            SAY(220, 'להקלטה למילוי טבלה הקישו 1, לעריכת התבנית הקישו 2, למחיקת התבנית הקישו 3, לחזרה הקישו 0')
         ], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
 
         if (choice === '0') return false;
@@ -1999,15 +2022,15 @@ async function excelTemplateMenu(call, phone, customer, t) {
             continue;
         }
         if (choice === '3') {
-            const sure = await call.read([TTS('שימו לב, התבנית והטבלה שלה יימחקו. למחיקה הקישו 1, לביטול הקישו 2')],
+            const sure = await call.read([SAY(221, 'שימו לב, התבנית והטבלה שלה יימחקו. למחיקה הקישו 1, לביטול הקישו 2')],
                 'tap', { max_digits: 1, digits_allowed: [1, 2] });
             if (sure !== '1') continue;
             try {
                 await axios.post(`${PYTHON_URL}/api/excel/template/delete`, { phone, template_id: t.id });
-                await call.id_list_message([TTS('התבנית נמחקה')], { prependToNextAction: true });
+                await call.id_list_message([SAY(222, 'התבנית נמחקה')], { prependToNextAction: true });
             } catch (e) {
                 if (isHangup(e)) throw e;
-                await call.id_list_message([TTS('אירעה תקלה במחיקה')], { prependToNextAction: true });
+                await call.id_list_message([SAY(223, 'אירעה תקלה במחיקה')], { prependToNextAction: true });
             }
             return false;
         }
@@ -2016,11 +2039,11 @@ async function excelTemplateMenu(call, phone, customer, t) {
         let mode = 'new';
         if ((t.rows_count || 0) > 0) {
             const m = await call.read([
-                TTS(`בטבלה הקיימת יש ${t.rows_count} שורות. להמשך הטבלה הקיימת הקישו 1, להתחלת טבלה חדשה הקישו 2`)
+                SAY(224, 'בטבלה הקיימת יש'), TTS(String(t.rows_count)), SAY(225, 'שורות. להמשך הטבלה הקיימת הקישו 1, להתחלת טבלה חדשה הקישו 2')
             ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
             if (m === '2') {
                 const sure = await call.read([
-                    TTS('שימו לב, התחלת טבלה חדשה תמחק את הטבלה הקיימת, ולא ניתן יהיה להמשיך אותה אחר כך. לאישור הקישו 1, לחזרה הקישו 2')
+                    SAY(226, 'שימו לב, התחלת טבלה חדשה תמחק את הטבלה הקיימת, ולא ניתן יהיה להמשיך אותה אחר כך. לאישור הקישו 1, לחזרה הקישו 2')
                 ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
                 if (sure !== '1') continue;
                 mode = 'new';
@@ -2036,7 +2059,7 @@ async function excelTemplateMenu(call, phone, customer, t) {
 async function excelRecord(call, phone, customer, t, mode) {
     liveStage(call, 'אקסל · הקלטה למילוי טבלה');
     await call.id_list_message([
-        TTS('הקריאו את הנתונים שורה אחרי שורה. בסוף כל שורה אמרו: שורה הבאה. בסיום הקישו סולמית')
+        SAY(227, 'הקריאו את הנתונים שורה אחרי שורה. בסוף כל שורה אמרו: שורה הבאה. בסיום הקישו סולמית')
     ], { prependToNextAction: true });
     const opts = { transcriptionTier: 'excel', language: 'he', outputLanguage: 'he', excelTemplateId: t.id, excelMode: mode };
     const recPath = await recordWithMenu(call, phone, customer, opts);
@@ -2080,7 +2103,7 @@ async function excelRecord(call, phone, customer, t, mode) {
         console.error('excel transcribe error:', e.message);
     }
     await call.id_list_message([
-        TTS('ההקלטה התקבלה, הטבלה תישלח אליכם בקרוב. שיחה טובה'),
+        SAY(228, 'ההקלטה התקבלה, הטבלה תישלח אליכם בקרוב. שיחה טובה'),
         { type: 'go_to_folder', data: '/' }
     ]);
 }
@@ -2137,7 +2160,7 @@ async function handleEmailRequestMessage(call, phone, customer) {
     }
 
     const recPath = await call.read([
-        TTS('אמרו לאחר הצליל את כתובת המייל שלכם באופן ברור, ואם אפשר גם אותיות באנגלית אחת אחת. לסיום הקישו סולמית'),
+        SAY(229, 'אמרו לאחר הצליל את כתובת המייל שלכם באופן ברור, ואם אפשר גם אותיות באנגלית אחת אחת. לסיום הקישו סולמית'),
     ], 'record', {
         no_confirm_menu: true,
         save_on_hangup: false,
@@ -2168,7 +2191,7 @@ async function handleEmailRequestMessage(call, phone, customer) {
     } catch (e) {
         console.error('email-request message error:', e.message);
     }
-    await call.id_list_message([TTS('הודעתכם התקבלה, נציג יעדכן את כתובת המייל בהקדם')], { prependToNextAction: true });
+    await call.id_list_message([SAY(230, 'הודעתכם התקבלה, נציג יעדכן את כתובת המייל בהקדם')], { prependToNextAction: true });
 }
 
 async function handleUpdateDetails(call, phone) {
