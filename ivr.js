@@ -1279,9 +1279,29 @@ async function presentMainMenu(call, phone) {
     const allowedDigits = phone === ADMIN_PHONE ? [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] : [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
     // העברה מהדשבורד לאחת מאפשרויות התפריט - בלי להשמיע את התפריט (ראה takeLiveJump)
-    const choice = takeLiveJump(call) || await call.read([
+    const liveJump = takeLiveJump(call);
+
+    // הודעה קולית שממתינה ללקוח (פרטית או תפוצתית) - אחרי 001 ולפני 002, בלי אפשרות לדלג
+    let intro = [
         ...pendingParts,  // הודעת הקלטה ממתינה לתשלום — נשמעת ראשונה, לפני הברכה
         MSG(1),   // 001 - שלום, ברוכים הבאים למערכת התמלול
+    ];
+    if (!liveJump) {
+        let voicePending = [];
+        try {
+            voicePending = (await axios.get(`${PYTHON_URL}/api/voice-messages/${phone}`)).data.pending || [];
+        } catch (e) {
+            if (isHangup(e)) throw e;
+            console.error('voice messages error:', e.message);
+        }
+        if (voicePending.length) {
+            await playVoiceMessagesOnce(call, phone, voicePending, intro);
+            intro = [];   // הברכה כבר הושמעה יחד עם ההודעה
+        }
+    }
+
+    const choice = liveJump || await call.read([
+        ...intro,
         MSG(2),   // 002 - קובץ ריק — הודעה זמנית לכניסה
         ...balanceParts,
         MSG(4),   // 004 - תפריט ראשי: הקש 1... הקש 9 (יש לעדכן בימות שגם הקש 7 קיים - כניסה עם מספר תלמיד)
@@ -1308,6 +1328,46 @@ async function presentMainMenu(call, phone) {
     } else {
         await handleOptions(call, phone);
     }
+}
+
+// --- הודעות קוליות ללקוח (נוצרות בממשק: כרטיס לקוח / הודעה תפוצתית) ---
+function voiceMessagePart(m) {
+    return m.type === 'file' ? { type: 'file', data: m.path } : TTS(m.text);
+}
+
+// השמעה בכניסה, פעם אחת עד הסוף. ימות לא מאפשרים לחסום מקשים בזמן השמעה, אז אם
+// הלקוח מקיש באמצע - ההודעה מתחילה מחדש ("יש להאזין עד הסוף"). רק השמעה מלאה
+// מסומנת כ"נשמעה"; אחרי 3 ניסיונות ממשיכים, וההודעה תושמע שוב בכניסה הבאה.
+async function playVoiceMessagesOnce(call, phone, msgs, lead) {
+    liveStage(call, 'הודעה קולית');
+    const parts = msgs.map(voiceMessagePart);
+    let prompt = [...lead, ...parts];
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        const r = await call.read(prompt, 'tap', {
+            max_digits: 1, digits_allowed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            sec_wait: 1, allow_empty: true, empty_val: 'NONE'
+        });
+        if (r === 'NONE' || r === '' || r === undefined) {
+            try {
+                await axios.post(`${PYTHON_URL}/api/voice-messages/heard`, { phone, ids: msgs.map(m => m.id) });
+            } catch (e) { console.error('voice heard error:', e.message); }
+            return true;
+        }
+        prompt = [TTS('יש להאזין להודעה עד סופה'), ...parts];
+    }
+    return false;
+}
+
+// שלוחה 9 - שמיעה חוזרת של ההודעות
+async function replayVoiceMessages(call, msgs) {
+    liveStage(call, '9 · שמיעה חוזרת של הודעות');
+    const parts = msgs.map(voiceMessagePart);
+    for (;;) {
+        const c = await call.read([...parts, TTS('לשמיעה חוזרת הקישו 1, לחזרה לתפריט הראשי הקישו 0')],
+            'tap', { max_digits: 1, digits_allowed: [0, 1] });
+        if (c !== '1') break;
+    }
+    await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
 }
 
 async function handleStudentLogin(call, attempt = 1) {
@@ -1499,6 +1559,20 @@ async function handleFaxCode(call, phone) {
 
 async function handleManagerMessage(call, phone, customer) {
     liveStage(call, '9 · הודעה למנהל');
+    // אם יש ללקוח הודעות קוליות מהמערכת - קודם אפשרות לשמוע אותן שוב
+    let voiceReplay = [];
+    try {
+        voiceReplay = (await axios.get(`${PYTHON_URL}/api/voice-messages/${phone}`)).data.replay || [];
+    } catch (e) {
+        if (isHangup(e)) throw e;
+        console.error('voice replay error:', e.message);
+    }
+    if (voiceReplay.length) {
+        const c = await call.read([TTS('לשמיעה חוזרת של ההודעות מהמערכת הקישו 1, להשארת הודעה למנהל הקישו 2')],
+            'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        if (c === '1') return await replayVoiceMessages(call, voiceReplay);
+        liveStage(call, '9 · הודעה למנהל');
+    }
     // משריינים מראש ID קצר ורציף (כמו שהיה במקור) - כדי שהמספר שמופיע בשלוחת
     // ההאזנה בימות יתאים בדיוק למספר שמוצג לכל הודעה בממשק הניהול. ה"הגנה"
     // מפני הודעות ריקות לא נעשית יותר ע"י מניעת שריון (זה שבר את המספור),
