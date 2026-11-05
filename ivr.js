@@ -1633,13 +1633,14 @@ async function handleRecording(call, phone, customer) {
     }
 
     // 015 - לתמלול רגיל הקש 1 לתמלול מקצועי הקש 2, 083 - הכרזת מחיר, ואז הלקוח בוחר
-    // 3 - טבלאות אקסל: בשלב הבדיקות רק למנהל (לקוחות לא שומעים ולא יכולים להקיש 3).
-    // כשההודעות יוקלטו - להסיר את התנאי ולעדכן את הודעה 015.
-    const excelOpen = phone === '0527134491';
+    // 3 - טבלאות אקסל: פתוח לכל הלקוחות (לבודקים שיודעים עליו), אבל ההכרזה "הקישו 3"
+    // נשמעת רק למנהל - לקוחות רגילים לא שומעים עליו. כשההודעות יוקלטו - להשמיע לכולם
+    // ולעדכן את הודעה 015.
+    const excelAnnounce = phone === '0527134491';
     const tierChoice = await call.read(
-        excelOpen ? [MSG(15), MSG(83), TTS('ליצירת טבלאות אקסל הקישו 3')] : [MSG(15), MSG(83)],
-        'tap', { max_digits: 1, digits_allowed: excelOpen ? [1, 2, 3] : [1, 2] });
-    if (tierChoice === '3' && excelOpen) {
+        excelAnnounce ? [MSG(15), MSG(83), TTS('ליצירת טבלאות אקסל הקישו 3')] : [MSG(15), MSG(83)],
+        'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
+    if (tierChoice === '3') {
         await handleExcel(call, phone, customer);
         return;
     }
