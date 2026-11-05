@@ -1660,6 +1660,12 @@ async function handleRecording(call, phone, customer) {
     } catch (e) {
         console.error('could not fetch settings:', e.message);
     }
+    // מחירון אישי של הלקוח (לפי 20 או לפי 5 דקות - נקבע בכרטיס הלקוח בממשק)
+    const per5 = customer && customer.billing_unit === 5;
+    if (customer && customer.unit_prices) {
+        priceBasic = parseFloat(customer.unit_prices.basic) || priceBasic;
+        pricePremium = parseFloat(customer.unit_prices.premium) || pricePremium;
+    }
 
     const minPrice = Math.min(priceBasic, pricePremium);
 
@@ -1711,8 +1717,12 @@ async function handleRecording(call, phone, customer) {
     // נשמעת רק למנהל - לקוחות רגילים לא שומעים עליו. כשההודעות יוקלטו - להשמיע לכולם
     // ולעדכן את הודעה 015.
     const excelAnnounce = phone === '0527134491';
+    // 083 - הכרזת המחיר (ל-20 דקות). לקוח בחיוב לפי 5 דקות שומע את המחיר שלו בהקראה ממוחשבת
+    const priceAnnounce = per5
+        ? TTS(`המחיר לכל 5 דקות: תמלול רגיל ${moneyText(priceBasic)}, תמלול מקצועי ${moneyText(pricePremium)}`)
+        : MSG(83);
     const tierChoice = await call.read(
-        excelAnnounce ? [MSG(15), MSG(83), TTS('ליצירת טבלאות אקסל הקישו 3')] : [MSG(15), MSG(83)],
+        excelAnnounce ? [MSG(15), priceAnnounce, TTS('ליצירת טבלאות אקסל הקישו 3')] : [MSG(15), priceAnnounce],
         'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
     if (tierChoice === '3') {
         await handleExcel(call, phone, customer);
@@ -1844,6 +1854,15 @@ async function handleRecording(call, phone, customer) {
 // והקלטת המילוי נשלחת ל-/api/transcribe עם transcription_tier='excel'.
 // ---------------------------------------------------------------------------
 // טקסט להקראה ממוחשבת - ימות לא מקבלים את התווים . - " ' & | בטקסט
+// סכום להקראה: "25 אגורות" / "שקל ו 50 אגורות" / "2 שקל"
+function moneyText(v) {
+    const total = Math.round((parseFloat(v) || 0) * 100);
+    const sh = Math.floor(total / 100), ag = total % 100;
+    if (!sh) return `${ag} אגורות`;
+    const shText = sh === 1 ? 'שקל' : `${sh} שקל`;
+    return ag ? `${shText} ו ${ag} אגורות` : shText;
+}
+
 function TTS(text) {
     return { type: 'text', data: String(text || '').replace(/[.\-"'&|]/g, ' ').replace(/\s+/g, ' ').trim() || ' ' };
 }
@@ -1869,6 +1888,7 @@ async function handleExcel(call, phone, customer) {
         const st = await axios.get(`${PYTHON_URL}/api/settings`);
         price = parseFloat(st.data.price_per_20min_excel || 1.5);
     } catch (e) { /* ברירת מחדל */ }
+    if (customer && customer.unit_prices) price = parseFloat(customer.unit_prices.excel) || price;
     const balance = customer ? parseFloat(customer.balance || 0) : 0;
     if (balance < price) {
         await call.id_list_message([
@@ -2362,6 +2382,7 @@ async function handleQuickRecord(call, phone, customer) {
         const settingsRes = await axios.get(`${PYTHON_URL}/api/settings`);
         priceBasic = parseFloat(settingsRes.data.price_per_20min_basic || 0.90);
     } catch (e) {}
+    if (customer && customer.unit_prices) priceBasic = parseFloat(customer.unit_prices.basic) || priceBasic;
 
     // טען ברירות מחדל של הלקוח (גם אם אין כסף — עדיין מקליטים ושומרים)
     const defaults = customer && customer.default_settings ? customer.default_settings : {};
