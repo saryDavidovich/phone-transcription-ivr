@@ -1559,21 +1559,74 @@ async function handleFaxCode(call, phone) {
     await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
 }
 
-async function handleManagerMessage(call, phone, customer) {
-    liveStage(call, '9 · הודעה למנהל');
-    // אם יש ללקוח הודעות קוליות מהמערכת - קודם אפשרות לשמוע אותן שוב
-    let voiceReplay = [];
-    try {
-        voiceReplay = (await axios.get(`${PYTHON_URL}/api/voice-messages/${phone}`)).data.replay || [];
-    } catch (e) {
+// ---------------------------------------------------------------------------
+// מענה אנושי (שלוחה 9 ← 3): מעבירים לשלוחה בימות שמוגדרת כהפניה לכתובת ה-SIP של
+// מרכזיית נדרים פלוס (sip:<מוסד>-<מפתח>@51.17.156.113:5070). הכתובת והמפתח הסודי
+// מוגדרים רק בימות, לא כאן. כשאין נציג / מחוץ לשעות - נדרים דוחים (403), וימות
+// ממשיכים ל"שלב הבא" של השלוחה: שלוחת HUMAN_FAIL_FOLDER, שמצביעה ל-/human-fail כאן
+// (תפריט: השארת הודעה למנהל / חזרה לתפריט הראשי).
+// ---------------------------------------------------------------------------
+// מופעל רק כשמוגדר HUMAN_AGENT_FOLDER (מספר השלוחה בימות - 300) וגם הוקלט בקריין תפריט 232/233 -
+// עד אז שלוחה 9 בדיוק כמו קודם
+const HUMAN_FOLDER = (process.env.HUMAN_AGENT_FOLDER || '').trim();
+
+async function transferToHuman(call) {
+    liveStage(call, '9 · מענה אנושי');
+    await call.id_list_message([
+        SAY(234, 'מעבירים אתכם לנציג, אנא המתינו'),
+        { type: 'go_to_folder', data: HUMAN_FOLDER }
+    ]);
+}
+
+// השלב הבא בשלוחת המענה האנושי בימות (routing_ip_end_goto -> שלוחת API שמצביעה לכאן).
+// ימות מגיעים לכאן גם כשנדרים דחו (אין נציג / סגור) וגם אחרי שיחה שהסתיימה עם נציג -
+// ואין דרך לדעת מה מהשניים, לכן התפריט ניטרלי: הודעה למנהל / תפריט ראשי / בלי הקשה = סיום.
+router.get('/human-fail', async (call) => {
+    liveStage(call, '9 · אחרי נציג');
+    const phone = call.ApiPhone;
+    const c = await call.read([SAY(235, 'אם לא נמצא נציג פנוי, אפשר להשאיר הודעה למנהל והוא יחזור אליכם. להשארת הודעה הקישו 2, לחזרה לתפריט הראשי הקישו 0')],
+        'tap', { max_digits: 1, digits_allowed: [0, 2], sec_wait: 7, allow_empty: true, empty_val: 'NONE' });
+    if (c === '0') return await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
+    if (c !== '2') return await call.id_list_message([{ type: 'go_to_folder', data: 'hangup' }]);
+    let customer = null;
+    try { customer = (await axios.get(`${PYTHON_URL}/api/customer/${phone}`)).data; } catch (e) {
         if (isHangup(e)) throw e;
-        console.error('voice replay error:', e.message);
     }
-    if (voiceReplay.length) {
-        const c = await call.read([SAY(203, 'לשמיעה חוזרת של ההודעות מהמערכת הקישו 1, להשארת הודעה למנהל הקישו 2')],
-            'tap', { max_digits: 1, digits_allowed: [1, 2] });
-        if (c === '1') return await replayVoiceMessages(call, voiceReplay);
+    await handleManagerMessage(call, phone, customer, { intro: MSG(9) });
+});
+
+async function handleManagerMessage(call, phone, customer, opts = {}) {
+    liveStage(call, '9 · הודעה למנהל');
+    if (!opts.intro) {
+        // תפריט שלוחה 9: 1 = שמיעה חוזרת של הודעות מהמערכת (אם יש), 2 = הודעה למנהל, 3 = נציג
+        let voiceReplay = [];
+        try {
+            voiceReplay = (await axios.get(`${PYTHON_URL}/api/voice-messages/${phone}`)).data.replay || [];
+        } catch (e) {
+            if (isHangup(e)) throw e;
+            console.error('voice replay error:', e.message);
+        }
+        const hasReplay = voiceReplay.length > 0;
+        // אפשרות הנציג נשמעת רק כשהשלוחה בימות מוגדרת (HUMAN_AGENT_FOLDER) וגם תפריט שלוחה 9
+        // החדש כבר הוקלט והועלה בקריין (232 / 233). עד אז - בדיוק כמו קודם.
+        const useHuman = HUMAN_FOLDER && isRecorded(hasReplay ? 233 : 232);
+        if (!useHuman) {              // בלי מענה אנושי - כמו שהיה
+            if (hasReplay) {
+                const c0 = await call.read([SAY(203, 'לשמיעה חוזרת של ההודעות מהמערכת הקישו 1, להשארת הודעה למנהל הקישו 2')],
+                    'tap', { max_digits: 1, digits_allowed: [1, 2] });
+                if (c0 === '1') return await replayVoiceMessages(call, voiceReplay);
+                liveStage(call, '9 · הודעה למנהל');
+            }
+        } else {
+        const c = await call.read([hasReplay
+                ? SAY(233, 'לשמיעה חוזרת של ההודעות מהמערכת הקישו 1, להשארת הודעה למנהל הקישו 2, לשיחה עם נציג הקישו 3')
+                : SAY(232, 'להשארת הודעה למנהל הקישו 2, לשיחה עם נציג הקישו 3')],
+            'tap', { max_digits: 1, digits_allowed: hasReplay ? [1, 2, 3] : [2, 3], sec_wait: 5,
+                     allow_empty: true, empty_val: '2' });   // בלי הקשה - כמו קודם: השארת הודעה
+        if (c === '1' && hasReplay) return await replayVoiceMessages(call, voiceReplay);
+        if (c === '3') return await transferToHuman(call);
         liveStage(call, '9 · הודעה למנהל');
+        }
     }
     // משריינים מראש ID קצר ורציף (כמו שהיה במקור) - כדי שהמספר שמופיע בשלוחת
     // ההאזנה בימות יתאים בדיוק למספר שמוצג לכל הודעה בממשק הניהול. ה"הגנה"
@@ -1595,7 +1648,7 @@ async function handleManagerMessage(call, phone, customer) {
     // 010 - השאר הודעתך למנהל לאחר הצליל, לסיום הקש סולמית
     let recPath;
     try {
-        recPath = await call.read([MSG(9), MSG(10)], 'record', {
+        recPath = await call.read(opts.intro ? [opts.intro, MSG(10)] : [MSG(9), MSG(10)], 'record', {
             no_confirm_menu: true,
             save_on_hangup: false,
             path: '/manager_messages',
@@ -1870,6 +1923,11 @@ async function refreshSysMsgs(force) {
     } catch (e) {
         console.error('system messages refresh error:', e.message);
     }
+}
+// האם להודעה הזו כבר הועלתה הקלטה (מהקריין בממשק)
+function isRecorded(num) {
+    const m = sysMsgs[String(num)];
+    return !!(m && m.r);
 }
 function SAY(num, fallback) {
     const m = sysMsgs[String(num)];
