@@ -1580,14 +1580,14 @@ async function transferToHuman(call) {
 
 // השלב הבא בשלוחת המענה האנושי בימות (routing_ip_end_goto -> שלוחת API שמצביעה לכאן).
 // ימות מגיעים לכאן גם כשנדרים דחו (אין נציג / סגור) וגם אחרי שיחה שהסתיימה עם נציג -
-// ואין דרך לדעת מה מהשניים, לכן התפריט ניטרלי: הודעה למנהל / תפריט ראשי / בלי הקשה = סיום.
+// ואין דרך לדעת מה מהשניים, לכן התפריט ניטרלי: הודעה למנהל / תפריט ראשי (גם בלי הקשה).
 router.get('/human-fail', async (call) => {
     liveStage(call, '9 · אחרי נציג');
     const phone = call.ApiPhone;
     const c = await call.read([SAY(235, 'אם לא נמצא נציג פנוי, אפשר להשאיר הודעה למנהל והוא יחזור אליכם. להשארת הודעה הקישו 2, לחזרה לתפריט הראשי הקישו 0')],
         'tap', { max_digits: 1, digits_allowed: [0, 2], sec_wait: 7, allow_empty: true, empty_val: 'NONE' });
-    if (c === '0') return await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
-    if (c !== '2') return await call.id_list_message([{ type: 'go_to_folder', data: 'hangup' }]);
+    // 0 או בלי הקשה - חזרה לתפריט הראשי ('hangup' לא עובד מתוך שלוחה 301 - ימות לא מכירים אותה שם)
+    if (c !== '2') return await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
     let customer = null;
     try { customer = (await axios.get(`${PYTHON_URL}/api/customer/${phone}`)).data; } catch (e) {
         if (isHangup(e)) throw e;
