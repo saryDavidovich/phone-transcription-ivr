@@ -1640,15 +1640,12 @@ async function handleManagerMessage(call, phone, customer, opts = {}) {
         if (c === '3' && useHuman) return await transferToHuman(call);
         if (c === '4' && useTz) {
             liveStage(call, '9 · הרשמה לצינתוק');
-            // התפריט שלנו: 1 הרשמה, 2 הסרה (במקום התפריט המלא של ימות)
-            const act = await call.read([SAY(253, 'להרשמה לקבלת צינתוק כשמחכה לכם הודעה חדשה הקישו 1, להסרה מהרשימה הקישו 2')],
-                'tap', { max_digits: 1, digits_allowed: [1, 2] });
-            // שלוחת צינתוקים אישית למתקשר (רשימה שבה רק הוא) - נוצרת בימות בפעם הראשונה.
-            // הרשמה: <אב>/<טלפון> (תפריט ימות מוחלף בהקלטה 254). הסרה: <אב>/<טלפון>/2 - מיידית, בלי תפריט
+            // ישר לשלוחת הצינתוקים האישית של המתקשר בימות (רשימה שבה רק הוא) - נוצרת בפעם הראשונה.
+            // שם התפריט של ימות (M3332 - לא ניתן להחלפה): 1 הרשמה, 2 הסרה וכו'
             let folder = null;
             try {
                 const r = (await axios.post(`${PYTHON_URL}/api/tzintuk/prepare`,
-                    { phone: call.ApiPhone, action: act === '2' ? 'remove' : 'add' }, { timeout: 20000 })).data || {};
+                    { phone: call.ApiPhone, action: 'add' }, { timeout: 20000 })).data || {};
                 if (r.ok && r.folder) folder = r.folder;
                 else console.error('tzintuk prepare:', r.error);
             } catch (e) {
