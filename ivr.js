@@ -1361,9 +1361,14 @@ async function playVoiceMessagesOnce(call, phone, msgs, lead) {
 }
 
 // שלוחה 9 - שמיעה חוזרת של ההודעות
-async function replayVoiceMessages(call, msgs) {
+async function replayVoiceMessages(call, msgs, beep) {
     liveStage(call, '9 · שמיעה חוזרת של הודעות');
-    const parts = msgs.map(voiceMessagePart);
+    // צפצוף בין הודעה להודעה (הקובץ נוצר בשרת ומועלה לימות - beep ריק = עוד לא מוכן, בלי צפצוף)
+    const parts = [];
+    msgs.forEach((m, i) => {
+        if (i && beep) parts.push({ type: 'file', data: beep });
+        parts.push(voiceMessagePart(m));
+    });
     for (;;) {
         const c = await call.read([...parts, SAY(202, 'לשמיעה חוזרת הקישו 1, לחזרה לתפריט הראשי הקישו 0')],
             'tap', { max_digits: 1, digits_allowed: [0, 1] });
@@ -1569,6 +1574,8 @@ async function handleFaxCode(call, phone) {
 // מופעל רק כשמוגדר HUMAN_AGENT_FOLDER (מספר השלוחה בימות - 300) וגם הוקלט בקריין תפריט 232/233 -
 // עד אז שלוחה 9 בדיוק כמו קודם
 const HUMAN_FOLDER = (process.env.HUMAN_AGENT_FOLDER || '').trim();
+// שלוחת הצינתוקים בימות (type=tzintuk) - הרשמה לרשימת הצינתוקים מתוך שלוחה 9 (מקש 4)
+const TZINTUK_FOLDER = (process.env.TZINTUK_FOLDER || '').trim();
 
 async function transferToHuman(call) {
     liveStage(call, '9 · מענה אנושי');
@@ -1599,9 +1606,11 @@ async function handleManagerMessage(call, phone, customer, opts = {}) {
     liveStage(call, '9 · הודעה למנהל');
     if (!opts.intro) {
         // תפריט שלוחה 9: 1 = שמיעה חוזרת של הודעות מהמערכת (אם יש), 2 = הודעה למנהל, 3 = נציג
-        let voiceReplay = [];
+        let voiceReplay = [], voiceBeep = null;
         try {
-            voiceReplay = (await axios.get(`${PYTHON_URL}/api/voice-messages/${phone}`)).data.replay || [];
+            const vd = (await axios.get(`${PYTHON_URL}/api/voice-messages/${phone}`)).data || {};
+            voiceReplay = vd.replay || [];
+            voiceBeep = vd.beep || null;
         } catch (e) {
             if (isHangup(e)) throw e;
             console.error('voice replay error:', e.message);
@@ -1610,23 +1619,29 @@ async function handleManagerMessage(call, phone, customer, opts = {}) {
         // אפשרות הנציג נשמעת רק כשהשלוחה בימות מוגדרת (HUMAN_AGENT_FOLDER) וגם תפריט שלוחה 9
         // החדש כבר הוקלט והועלה בקריין (232 / 233). עד אז - בדיוק כמו קודם.
         const useHuman = HUMAN_FOLDER && isRecorded(hasReplay ? 233 : 232);
-        if (!useHuman) {              // בלי מענה אנושי - כמו שהיה
-            if (hasReplay) {
-                const c0 = await call.read([SAY(203, 'לשמיעה חוזרת של ההודעות מהמערכת הקישו 1, להשארת הודעה למנהל הקישו 2')],
-                    'tap', { max_digits: 1, digits_allowed: [1, 2] });
-                if (c0 === '1') return await replayVoiceMessages(call, voiceReplay);
-                liveStage(call, '9 · הודעה למנהל');
-            }
-        } else {
-        const c = await call.read([hasReplay
-                ? SAY(233, 'לשמיעה חוזרת של ההודעות מהמערכת הקישו 1, להשארת הודעה למנהל הקישו 2, לשיחה עם נציג הקישו 3')
-                : SAY(232, 'להשארת הודעה למנהל הקישו 2, לשיחה עם נציג הקישו 3')],
-            'tap', { max_digits: 1, digits_allowed: hasReplay ? [1, 2, 3] : [2, 3], sec_wait: 5,
-                     allow_empty: true, empty_val: '2' });   // בלי הקשה - כמו קודם: השארת הודעה
-        if (c === '1' && hasReplay) return await replayVoiceMessages(call, voiceReplay);
-        if (c === '3') return await transferToHuman(call);
-        liveStage(call, '9 · הודעה למנהל');
+        // הרשמה לצינתוקים (4): פעיל כשמוגדרת השלוחה בימות (TZINTUK_FOLDER). אין הודעה נפרדת -
+        // האפשרות נאמרת בהקלטות של תפריט שלוחה 9 עצמן (232 / 233)
+        const useTz = !!TZINTUK_FOLDER;
+        const tzPart = [];
+        const tzKey = useTz ? [4] : [];
+        let c = '2';
+        if (useHuman) {
+            c = await call.read([hasReplay
+                    ? SAY(233, 'לשמיעה חוזרת של ההודעות מהמערכת הקישו 1, להשארת הודעה למנהל הקישו 2, לשיחה עם נציג הקישו 3')
+                    : SAY(232, 'להשארת הודעה למנהל הקישו 2, לשיחה עם נציג הקישו 3'), ...tzPart],
+                'tap', { max_digits: 1, digits_allowed: (hasReplay ? [1, 2, 3] : [2, 3]).concat(tzKey), sec_wait: 5,
+                         allow_empty: true, empty_val: '2' });   // בלי הקשה - כמו קודם: השארת הודעה
+        } else if (hasReplay) {       // בלי מענה אנושי - כמו שהיה
+            c = await call.read([SAY(203, 'לשמיעה חוזרת של ההודעות מהמערכת הקישו 1, להשארת הודעה למנהל הקישו 2'), ...tzPart],
+                'tap', { max_digits: 1, digits_allowed: [1, 2].concat(tzKey) });
         }
+        if (c === '1' && hasReplay) return await replayVoiceMessages(call, voiceReplay, voiceBeep);
+        if (c === '3' && useHuman) return await transferToHuman(call);
+        if (c === '4' && useTz) {
+            liveStage(call, '9 · הרשמה לצינתוק');
+            return await call.id_list_message([{ type: 'go_to_folder', data: TZINTUK_FOLDER }]);
+        }
+        liveStage(call, '9 · הודעה למנהל');
     }
     // משריינים מראש ID קצר ורציף (כמו שהיה במקור) - כדי שהמספר שמופיע בשלוחת
     // ההאזנה בימות יתאים בדיוק למספר שמוצג לכל הודעה בממשק הניהול. ה"הגנה"
