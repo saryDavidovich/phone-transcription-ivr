@@ -2517,10 +2517,51 @@ async function handleQuickRecord(call, phone, customer) {
     await call.id_list_message([MSG(26), { type: 'go_to_folder', data: '/' }]);
 }
 
+// ---------------------------------------------------------------------------
+// תפריט מנהל (0): קוד סודי בכניסה (ADMIN_PHONE_PIN בשרת הראשי). בלי קוד מוגדר - בדיוק
+// כמו קודם. עם קוד נכון נוספות: 4 = כמה הודעות ממתינות (בלי התוכן), 5 = יתרת לקוח וזיכוי.
+// ---------------------------------------------------------------------------
+async function adminApi(path, body) {
+    return (await axios.post(`${PYTHON_URL}/api/admin-phone/${path}`, body, { timeout: 15000 })).data || {};
+}
+
 async function handleAdminMenu(call) {
     liveStage(call, '0 · תפריט מנהל');
+    let token = null;
+    try {
+        const first = await adminApi('pin', { phone: call.ApiPhone, call_id: call.ApiCallId, pin: '' });
+        if (first.reason !== 'not_configured') {
+            if (first.reason === 'locked') {
+                return await call.id_list_message([SAY(246, 'הגישה לתפריט המנהל נעולה זמנית. שיחה טובה'), { type: 'go_to_folder', data: '/' }]);
+            }
+            const pin = await call.read([SAY(236, 'הקישו את הקוד הסודי ולסיום סולמית')], 'tap',
+                { max_digits: 12, terminate_keys: ['#'], typing_playback_mode: 'No', allow_empty: true, empty_val: '' });
+            const r = await adminApi('pin', { phone: call.ApiPhone, call_id: call.ApiCallId, pin });
+            if (!r.ok) {
+                return await call.id_list_message([
+                    r.reason === 'locked' ? SAY(246, 'הגישה לתפריט המנהל נעולה זמנית. שיחה טובה') : SAY(237, 'הקוד שגוי. שיחה טובה'),
+                    { type: 'go_to_folder', data: '/' }]);
+            }
+            token = r.token;
+        }
+    } catch (e) {
+        if (isHangup(e)) throw e;
+        console.error('admin pin error:', e.message);   // השרת לא זמין - ממשיכים לתפריט הישן בלבד
+    }
+    return await adminMenuLoop(call, token);
+}
+
+async function adminMenuLoop(call, token) {
+    liveStage(call, '0 · תפריט מנהל');
     // 094 - לשמיעת הודעות הקש 1, למעבר לשלוחה 59 הקש 2, להקלטה עם עריכה הקש 3 (יש להקליט מחדש)
-    const choice = await call.read([MSG(94)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
+    const choice = token
+        ? await call.read([SAY(238, 'לשמיעת הודעות לפי מספר הקישו 1, למעבר לשלוחה 59 הקישו 2, להקלטה עם עריכה הקישו 3, למספר ההודעות הממתינות הקישו 4, ליתרת לקוח וזיכוי הקישו 5, לתוצאות הפקודות מנדרים פלוס הקישו 6, להוראות הפקודות הקישו 7')],
+            'tap', { max_digits: 1, digits_allowed: [1, 2, 3, 4, 5, 6, 7] })
+        : await call.read([MSG(94)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
+
+    if (token && choice === '4') return await adminPendingSummary(call, token);
+    if (token && choice === '5') return await adminCustomerBalance(call, token);
+    if (token && (choice === '6' || choice === '7')) return await adminSayFromServer(call, token, choice === '6' ? 'commands' : 'help');
 
     if (choice === '2') {
         await call.id_list_message([{ type: 'go_to_folder', data: '59' }]);
@@ -2532,6 +2573,92 @@ async function handleAdminMenu(call) {
     }
 
     await handleAdminMessages(call);
+}
+
+async function adminPendingSummary(call, token) {
+    liveStage(call, '0 · הודעות ממתינות');
+    try {
+        const c = await adminApi('summary', { token, call_id: call.ApiCallId });
+        if (!c.ok) throw new Error(c.reason || 'error');
+        const text = c.total
+            ? `ממתינות לטיפול ${c.total} הודעות. הודעות טלפון ${c.phone}. תיבה כללית ${c.inbox}. הודעות מלקוחות ${c.customers}. נדרים פלוס ${c.nedarim}.`
+            : 'אין הודעות שממתינות לטיפול.';
+        await call.id_list_message([TTS(text)], { prependToNextAction: true });
+    } catch (e) {
+        if (isHangup(e)) throw e;
+        console.error('admin summary error:', e.message);
+        await call.id_list_message([SAY(245, 'הפעולה נכשלה')], { prependToNextAction: true });
+    }
+    return await adminMenuLoop(call, token);
+}
+
+// 6 = תוצאות הפקודות מנדרים פלוס, 7 = הוראות הפקודות - הטקסט מגיע מהשרת (services/nedarim_commands.py)
+async function adminSayFromServer(call, token, what) {
+    liveStage(call, what === 'commands' ? '0 · תוצאות פקודות' : '0 · הוראות פקודות');
+    try {
+        const r = await adminApi(what, { token, call_id: call.ApiCallId });
+        if (!r.ok) throw new Error(r.reason || 'error');
+        // טקסט ארוך - בקטעים קצרים לפי משפטים (הקראה ארוכה מדי בימות עלולה להיחתך)
+        const parts = [];
+        for (const sentence of String(r.text || '').split(/(?<=[.:])\s+/)) {
+            if (parts.length && (parts[parts.length - 1] + ' ' + sentence).length <= 220) parts[parts.length - 1] += ' ' + sentence;
+            else parts.push(sentence);
+        }
+        await call.id_list_message(parts.filter(Boolean).map(TTS), { prependToNextAction: true });
+    } catch (e) {
+        if (isHangup(e)) throw e;
+        console.error(`admin ${what} error:`, e.message);
+        await call.id_list_message([SAY(245, 'הפעולה נכשלה')], { prependToNextAction: true });
+    }
+    return await adminMenuLoop(call, token);
+}
+
+async function adminCustomerBalance(call, token) {
+    liveStage(call, '0 · יתרת לקוח');
+    const phone = await call.read([SAY(239, 'הקישו את מספר הטלפון של הלקוח ולסיום סולמית')], 'tap',
+        { max_digits: 12, min_digits: 9, terminate_keys: ['#'] });
+    let cust;
+    try {
+        cust = await adminApi('customer', { token, call_id: call.ApiCallId, phone });
+        if (!cust.ok) throw new Error(cust.reason || 'error');
+    } catch (e) {
+        if (isHangup(e)) throw e;
+        console.error('admin customer error:', e.message);
+        await call.id_list_message([SAY(245, 'הפעולה נכשלה')], { prependToNextAction: true });
+        return await adminMenuLoop(call, token);
+    }
+    if (!cust.found) {
+        await call.id_list_message([SAY(240, 'לא נמצא לקוח עם המספר הזה')], { prependToNextAction: true });
+        return await adminCustomerBalance(call, token);
+    }
+    const who = cust.name ? `הלקוח ${cust.name}` : 'הלקוח';
+    const next = await call.read([TTS(`יתרת ${who}: ${moneyText(cust.balance)}.`),
+        SAY(241, 'לזיכוי הלקוח הקישו 1, ללקוח אחר הקישו 2, לחזרה לתפריט המנהל הקישו 0')],
+        'tap', { max_digits: 1, digits_allowed: [0, 1, 2] });
+    if (next === '2') return await adminCustomerBalance(call, token);
+    if (next !== '1') return await adminMenuLoop(call, token);
+
+    // סכום: שקלים, וכוכבית לפני אגורות (למשל 2*50 = 2.50)
+    const raw = await call.read([SAY(242, 'הקישו את סכום הזיכוי בשקלים ולסיום סולמית. לאגורות הקישו כוכבית ואחריה את האגורות')],
+        'tap', { max_digits: 7, terminate_keys: ['#'] });
+    const amount = parseFloat(String(raw || '').replace('*', '.'));
+    if (!(amount > 0 && amount <= 500)) {
+        await call.id_list_message([SAY(245, 'הפעולה נכשלה')], { prependToNextAction: true });
+        return await adminMenuLoop(call, token);
+    }
+    const ok = await call.read([TTS(`זיכוי של ${moneyText(amount)} ${cust.name ? 'ל' + cust.name : 'ללקוח'}.`), SAY(243, 'לאישור הקישו 1, לביטול הקישו 2')],
+        'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    if (ok !== '1') return await adminMenuLoop(call, token);
+    try {
+        const r = await adminApi('credit', { token, call_id: call.ApiCallId, phone, amount });
+        if (!r.ok) throw new Error(r.reason || 'error');
+        await call.id_list_message([SAY(244, 'הזיכוי בוצע'), TTS(`היתרה החדשה: ${moneyText(r.balance)}.`)], { prependToNextAction: true });
+    } catch (e) {
+        if (isHangup(e)) throw e;
+        console.error('admin credit error:', e.message);
+        await call.id_list_message([SAY(245, 'הפעולה נכשלה')], { prependToNextAction: true });
+    }
+    return await adminMenuLoop(call, token);
 }
 
 async function handleAdminMessages(call) {
