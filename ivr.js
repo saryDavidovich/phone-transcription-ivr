@@ -1574,7 +1574,8 @@ async function handleFaxCode(call, phone) {
 // מופעל רק כשמוגדר HUMAN_AGENT_FOLDER (מספר השלוחה בימות - 300) וגם הוקלט בקריין תפריט 232/233 -
 // עד אז שלוחה 9 בדיוק כמו קודם
 const HUMAN_FOLDER = (process.env.HUMAN_AGENT_FOLDER || '').trim();
-// שלוחת הצינתוקים בימות (type=tzintuk) - הרשמה לרשימת הצינתוקים מתוך שלוחה 9 (מקש 4)
+// מקש 4 בשלוחה 9 פעיל כשמוגדר TZINTUK_FOLDER (כל ערך). ההרשמה עצמה - לשלוחה אישית
+// (/tz/<טלפון>) שהשרת יוצר בימות
 const TZINTUK_FOLDER = (process.env.TZINTUK_FOLDER || '').trim();
 
 async function transferToHuman(call) {
@@ -1639,7 +1640,21 @@ async function handleManagerMessage(call, phone, customer, opts = {}) {
         if (c === '3' && useHuman) return await transferToHuman(call);
         if (c === '4' && useTz) {
             liveStage(call, '9 · הרשמה לצינתוק');
-            return await call.id_list_message([{ type: 'go_to_folder', data: TZINTUK_FOLDER }]);
+            // שלוחת צינתוקים אישית למתקשר (רשימה שבה רק הוא) - נוצרת בימות בפעם הראשונה
+            let folder = null;
+            try {
+                const r = (await axios.post(`${PYTHON_URL}/api/tzintuk/prepare`, { phone: call.ApiPhone }, { timeout: 15000 })).data || {};
+                if (r.ok && r.folder) folder = r.folder;
+                else console.error('tzintuk prepare:', r.error);
+            } catch (e) {
+                if (isHangup(e)) throw e;
+                console.error('tzintuk prepare error:', e.message);
+            }
+            if (!folder) {
+                return await call.id_list_message([SAY(252, 'ההרשמה לצינתוקים אינה זמינה כרגע, נסו שוב מאוחר יותר'),
+                    { type: 'go_to_folder', data: '/' }]);
+            }
+            return await call.id_list_message([{ type: 'go_to_folder', data: folder }]);
         }
         liveStage(call, '9 · הודעה למנהל');
     }
