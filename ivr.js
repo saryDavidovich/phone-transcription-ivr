@@ -2011,26 +2011,20 @@ async function handleEmailOut(call, phone, customer) {
         if (!menu.ok) return await call.id_list_message([SAY(245, 'הפעולה נכשלה'), { type: 'go_to_folder', data: '/' }]);
         const prompt = [SAY(266, 'לשליחת הודעה במייל הקישו 1')];
         const allowed = [1, 3, 4, 0];
-        if (menu.replies > 0) {
-            prompt.push(TTS(menu.replies === 1 ? 'יש לכם תגובה חדשה' : `יש לכם ${menu.replies} תגובות חדשות`), SAY(267, 'לשמיעת התגובות הקישו 2'));
+        if (menu.replies_total > 0) {
+            if (menu.replies > 0) prompt.push(TTS(menu.replies === 1 ? 'יש לכם תגובה חדשה' : `יש לכם ${menu.replies} תגובות חדשות`));
+            prompt.push(SAY(267, 'לשמיעת התגובות ולמענה עליהן הקישו 2'));
             allowed.push(2);
         }
-        prompt.push(SAY(268, 'להוספת איש קשר הקישו 3, לקבלת רשימת אנשי הקשר וקישור לניהול שלהם במייל הקישו 4, לחזרה לתפריט הראשי הקישו 0'));
+        prompt.push(SAY(268, 'לניהול אנשי הקשר הקישו 3, לקבלת רשימת אנשי הקשר במייל הקישו 4, לחזרה לתפריט הראשי הקישו 0'));
         const c = await call.read(prompt, 'tap', { max_digits: 1, digits_allowed: allowed });
         if (c === '0') return await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
-        if (c === '2') { await playEmailReplies(call, phone); continue; }
-        if (c === '3') {
-            const email = await getEmail(call);
-            try {
-                const r = await featPost('email-out/contact', { phone, email });
-                await call.id_list_message([r.ok ? SAY(269, 'איש הקשר נשמר') : SAY(245, 'הפעולה נכשלה')], { prependToNextAction: true });
-            } catch (e) { if (isHangup(e)) throw e; }
-            continue;
-        }
+        if (c === '2') { if (await playEmailReplies(call, phone)) return; continue; }
+        if (c === '3') { await manageContacts(call, phone, menu.contacts || []); continue; }
         if (c === '4') {
             let r = {};
             try { r = await featPost('email-out/contacts-link', { phone }); } catch (e) { if (isHangup(e)) throw e; }
-            await call.id_list_message([r.ok ? SAY(270, 'נשלח אליכם מייל עם רשימת אנשי הקשר וקישור לניהול שלהם')
+            await call.id_list_message([r.ok ? SAY(270, 'נשלח אליכם מייל עם רשימת אנשי הקשר והסבר איך מעדכנים אותם במייל')
                                              : SAY(271, 'אין לכם כתובת מייל רשומה במערכת')], { prependToNextAction: true });
             continue;
         }
@@ -2038,21 +2032,75 @@ async function handleEmailOut(call, phone, customer) {
     }
 }
 
+// בחירת איש קשר מרשימה מוקראת. מחזיר את איש הקשר, או null (0 / אין)
+async function pickContact(call, contacts, intro, zeroPrompt) {
+    if (!contacts.length) return null;
+    const list = [intro];
+    contacts.slice(0, 20).forEach((c, i) => list.push(TTS(`ל${c.name} הקישו ${i + 1}`)));
+    if (zeroPrompt) list.push(zeroPrompt);
+    const many = contacts.length > 9;
+    if (many) list.push(SAY(274, 'ובסיום סולמית'));
+    const pick = await call.read(list, 'tap', many ? { max_digits: 2, terminate_keys: ['#'] } : { max_digits: 1, digits_allowed: [...Array(contacts.length + 1).keys()] });
+    const n = parseInt(pick, 10);
+    return (n >= 1 && n <= contacts.length) ? contacts[n - 1] : null;
+}
+
+// שם איש קשר בדיבור (מתומלל בשרת). מחזיר טקסט או ''
+async function recordContactName(call) {
+    const recPath = await call.read([SAY(278, 'אמרו את שם איש הקשר לאחר הצליל, ובסיום הקישו סולמית')], 'record',
+        { no_confirm_menu: true, save_on_hangup: false, path: '/tmp_emails' });
+    if (!recPath) return '';
+    try { return (await featPost('email-out/contact-name', { rec_url: yemotDownloadUrl(recPath) }, 30000)).name || ''; }
+    catch (e) { if (isHangup(e)) throw e; return ''; }
+}
+
+async function manageContacts(call, phone, contacts) {
+    const prompt = [SAY(292, 'להוספת איש קשר הקישו 1')];
+    const allowed = [1, 0];
+    if (contacts.length) { prompt.push(SAY(293, 'לעריכה או מחיקה של איש קשר הקישו 2')); allowed.push(2); }
+    prompt.push(SAY(299, 'לחזרה הקישו 0'));
+    const c = await call.read(prompt, 'tap', { max_digits: 1, digits_allowed: allowed });
+    if (c === '1') {
+        const email = await getEmail(call);
+        const name = await recordContactName(call);
+        let r = {};
+        try { r = await featPost('email-out/contact', { phone, email, name }); } catch (e) { if (isHangup(e)) throw e; }
+        await call.id_list_message([r.ok ? SAY(269, 'איש הקשר נשמר') : SAY(245, 'הפעולה נכשלה')], { prependToNextAction: true });
+        return;
+    }
+    if (c !== '2') return;
+    const ct = await pickContact(call, contacts, SAY(294, 'בחרו את איש הקשר'), SAY(299, 'לחזרה הקישו 0'));
+    if (!ct) return;
+    const act = await call.read([TTS(ct.name), SAY(295, 'לשינוי השם הקישו 1, לשינוי כתובת המייל הקישו 2, למחיקה הקישו 3, לחזרה הקישו 0')],
+        'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
+    let r = null;
+    try {
+        if (act === '1') {
+            const name = await recordContactName(call);
+            r = name ? await featPost('email-out/contact/update', { phone, id: ct.id, name }) : { ok: false };
+        } else if (act === '2') {
+            const email = await getEmail(call);
+            r = await featPost('email-out/contact/update', { phone, id: ct.id, email });
+        } else if (act === '3') {
+            const sure = await call.read([TTS(`למחיקת ${ct.name}`), SAY(296, 'לאישור המחיקה הקישו 1, לביטול הקישו 0')],
+                'tap', { max_digits: 1, digits_allowed: [0, 1] });
+            if (sure === '1') r = await featPost('email-out/contact/delete', { phone, id: ct.id });
+        }
+    } catch (e) { if (isHangup(e)) throw e; r = { ok: false }; }
+    if (r) await call.id_list_message([r.ok ? (act === '3' ? SAY(297, 'איש הקשר נמחק') : SAY(269, 'איש הקשר נשמר')) : SAY(245, 'הפעולה נכשלה')],
+        { prependToNextAction: true });
+}
+
 async function sendEmailToContact(call, phone, menu) {
     const contacts = menu.contacts || [];
     let target = null;   // { contact_id } או { email }
-    if (contacts.length) {
-        const list = [SAY(272, 'בחרו את הנמען')];
-        contacts.slice(0, 20).forEach((c, i) => list.push(TTS(`ל${c.name} הקישו ${i + 1}`)));
-        list.push(SAY(273, 'לכתובת מייל חדשה הקישו 0'));
-        const many = contacts.length > 9;
-        if (many) list.push(SAY(274, 'ובסיום סולמית'));
-        const pick = await call.read(list, 'tap', many ? { max_digits: 2, terminate_keys: ['#'] } : { max_digits: 1, digits_allowed: [...Array(contacts.length + 1).keys()] });
-        const n = parseInt(pick, 10);
-        if (n >= 1 && n <= contacts.length) target = { contact_id: contacts[n - 1].id };
-    }
+    const ct = await pickContact(call, contacts, SAY(272, 'בחרו את הנמען'), SAY(273, 'לכתובת מייל חדשה הקישו 0'));
+    if (ct) target = { contact_id: ct.id };
     if (!target) target = { email: await getEmail(call) };
+    return await recordAndSendEmail(call, phone, target);
+}
 
+async function recordAndSendEmail(call, phone, target) {
     const recPath = await recordConfirmed(call, SAY(275, 'הקליטו את ההודעה לאחר הצליל, ובסיום הקישו סולמית'));
     if (!recPath) return await call.id_list_message([SAY(245, 'הפעולה נכשלה'), { type: 'go_to_folder', data: '/' }]);
     let r = {};
@@ -2064,17 +2112,36 @@ async function sendEmailToContact(call, phone, menu) {
     return await call.id_list_message([SAY(245, 'הפעולה נכשלה'), { type: 'go_to_folder', data: '/' }]);
 }
 
+// התגובות: קודם החדשות, אחר כך אלה ששמעו. אחרי כל תגובה: הבאה / שוב / מענה / חזרה.
+// מחזיר true אם השיחה כבר הועברה הלאה (נשלח מענה)
 async function playEmailReplies(call, phone) {
     let replies = [];
     try { replies = (await featGet('email-out/replies', phone)).replies || []; } catch (e) { if (isHangup(e)) throw e; }
-    if (!replies.length) return;
-    const parts = [];
-    replies.forEach((r, i) => parts.push(TTS(`תגובה ${i + 1} מ ${r.from}`), ...ttsChunks(r.body || 'תגובה ריקה')));
-    while (true) {
-        const c = await call.read([...parts, SAY(277, 'לשמיעה חוזרת הקישו 1, להמשך הקישו 0')], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
-        if (c !== '1') break;
+    const heard = [];
+    let ended = true;
+    for (let i = 0; i < replies.length; i++) {
+        const r = replies[i];
+        if (r.new && !heard.includes(r.id)) heard.push(r.id);
+        const opts = r.can_reply ? SAY(277, 'לתגובה הבאה הקישו 1, לשמיעה חוזרת הקישו 2, למענה על התגובה הקישו 3, לחזרה לתפריט הקישו 0')
+                                 : SAY(279, 'לתגובה הבאה הקישו 1, לשמיעה חוזרת הקישו 2, לחזרה לתפריט הקישו 0');
+        const c = await call.read([TTS(`${r.new ? 'תגובה חדשה' : 'תגובה'} מ ${r.from}`), ...ttsChunks(r.body || 'תגובה ריקה'), opts],
+            'tap', { max_digits: 1, digits_allowed: r.can_reply ? [0, 1, 2, 3] : [0, 1, 2] });
+        if (c === '2') { i--; continue; }
+        if (c === '3' && r.can_reply) {
+            await markRepliesHeard(phone, heard);
+            await recordAndSendEmail(call, phone, { reply_id: r.id });
+            return true;
+        }
+        if (c === '0') { ended = false; break; }
     }
-    try { await featPost('email-out/replies/heard', { phone, ids: replies.map(r => r.id) }); } catch (e) { if (isHangup(e)) throw e; }
+    await markRepliesHeard(phone, heard);
+    if (replies.length && ended) await call.id_list_message([SAY(298, 'אין תגובות נוספות')], { prependToNextAction: true });
+    return false;
+}
+
+async function markRepliesHeard(phone, ids) {
+    if (!ids.length) return;
+    try { await featPost('email-out/replies/heard', { phone, ids }); } catch (e) { if (isHangup(e)) throw e; }
 }
 
 async function handleTasks(call, phone, customer) {
