@@ -2117,14 +2117,14 @@ async function newTask(call, phone, customer, menu) {
             intro = MSG(151);
             continue;
         }
-        const ch = await call.read([SAY(287, 'לקבלת התזכורת במייל הקישו 1, בפקס הקישו 2, בצינתוק והקראה בטלפון הקישו 3'),
-            TTS(`תזכורת בפקס בתוספת ${moneyText(r.fax_price)} לכל שליחה`)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
-        const channel = ch === '1' ? 'email' : ch === '2' ? 'fax' : 'tzintuk';
-        if (channel === 'email' && !r.email) {
+        const ch = await call.read([SAY(287, 'לקבלת התזכורת במייל הקישו 1, בפקס הקישו 2, בצינתוק והקראה בטלפון הקישו 3, במייל וגם בצינתוק הקישו 4, בפקס וגם בצינתוק הקישו 5'),
+            TTS(`תזכורת בפקס בתוספת ${moneyText(r.fax_price)} לכל שליחה`)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3, 4, 5] });
+        const channel = { '1': 'email', '2': 'fax', '3': 'tzintuk', '4': 'email,tzintuk', '5': 'fax,tzintuk' }[ch] || 'tzintuk';
+        if (channel.includes('email') && !r.email) {
             const email = await getEmail(call);
             try { await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email }); } catch (e) { if (isHangup(e)) throw e; }
         }
-        if (channel === 'fax' && !r.fax) {
+        if (channel.includes('fax') && !r.fax) {
             const fax = await call.read([MSG(25)], 'tap', { max_digits: 15, terminate_keys: ['#'] });   // 025 - הקש את מספר הפקס
             try { await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax }); } catch (e) { if (isHangup(e)) throw e; }
         }
