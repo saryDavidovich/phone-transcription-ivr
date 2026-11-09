@@ -1302,10 +1302,17 @@ async function presentMainMenu(call, phone) {
         }
     }
 
+    // תגובות חדשות למיילים שהלקוח שלח מהטלפון (שלוחה 1 ← 6)
+    const replyParts = (customer && customer.new_email_replies > 0)
+        ? [TTS(customer.new_email_replies === 1 ? 'יש לכם תגובה חדשה למייל ששלחתם' : `יש לכם ${customer.new_email_replies} תגובות חדשות למיילים ששלחתם`),
+           SAY(260, 'לשמיעה הקישו 1 ואז 6')]
+        : [];
+
     const choice = liveJump || await call.read([
         ...intro,
         MSG(2),   // 002 - קובץ ריק — הודעה זמנית לכניסה
         ...balanceParts,
+        ...replyParts,
         MSG(4),   // 004 - תפריט ראשי: הקש 1... הקש 9 (יש לעדכן בימות שגם הקש 7 קיים - כניסה עם מספר תלמיד)
     ], 'tap', { max_digits: 1, digits_allowed: allowedDigits });
 
@@ -1734,6 +1741,8 @@ async function handleManagerMessage(call, phone, customer, opts = {}) {
     ]);
 }
 
+const featureFlags = { mail: false, tasks: false };
+
 async function handleRecording(call, phone, customer) {
     liveStage(call, '1 · הקלטה לתמלול');
     const balance = customer ? parseFloat(customer.balance || 0) : 0;
@@ -1744,6 +1753,8 @@ async function handleRecording(call, phone, customer) {
         const settingsRes = await axios.get(`${PYTHON_URL}/api/settings`);
         priceBasic = parseFloat(settingsRes.data.price_per_20min_basic || 0.90);
         pricePremium = parseFloat(settingsRes.data.price_per_20min_premium || 1.90);
+        featureFlags.mail = settingsRes.data.email_out_enabled === '1';
+        featureFlags.tasks = settingsRes.data.tasks_enabled === '1';
     } catch (e) {
         console.error('could not fetch settings:', e.message);
     }
@@ -1804,17 +1815,26 @@ async function handleRecording(call, phone, customer) {
     // נשמעת רק למנהל - לקוחות רגילים לא שומעים עליו. כשההודעות יוקלטו - להשמיע לכולם
     // ולעדכן את הודעה 015.
     const excelAnnounce = phone === '0527134491';
+    // 5 - משימות ותזכורות, 6 - הודעה במייל לאיש קשר: כבויות בהגדרות = רק המנהל שומע ויכול להקיש
+    const isAdminPhone = phone === '0527134491';
+    const tasksOn = isAdminPhone || featureFlags.tasks;
+    const mailOn = isAdminPhone || featureFlags.mail;
+    const featAnnounce = [];
+    if (tasksOn) featAnnounce.push(SAY(261, 'למשימות ותזכורות הקישו 5'));
+    if (mailOn) featAnnounce.push(SAY(262, 'לשליחת הודעה במייל לאיש קשר הקישו 6'));
     // 083 - הכרזת המחיר (ל-20 דקות). לקוח בחיוב לפי 5 דקות שומע את המחיר שלו בהקראה ממוחשבת
     const priceAnnounce = per5
         ? [SAY(204, 'המחיר לכל 5 דקות: תמלול רגיל'), TTS(moneyText(priceBasic)), SAY(205, 'תמלול מקצועי'), TTS(moneyText(pricePremium))]
         : [MSG(83)];
     const tierChoice = await call.read(
-        excelAnnounce ? [MSG(15), ...priceAnnounce, SAY(206, 'ליצירת טבלאות אקסל הקישו 3')] : [MSG(15), ...priceAnnounce],
-        'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
+        excelAnnounce ? [MSG(15), ...priceAnnounce, SAY(206, 'ליצירת טבלאות אקסל הקישו 3'), ...featAnnounce] : [MSG(15), ...priceAnnounce, ...featAnnounce],
+        'tap', { max_digits: 1, digits_allowed: [1, 2, 3].concat(tasksOn ? [5] : [], mailOn ? [6] : []) });
     if (tierChoice === '3') {
         await handleExcel(call, phone, customer);
         return;
     }
+    if (tierChoice === '5' && tasksOn) return await handleTasks(call, phone, customer);
+    if (tierChoice === '6' && mailOn) return await handleEmailOut(call, phone, customer);
 
     const transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
 
@@ -1932,6 +1952,208 @@ async function handleRecording(call, phone, customer) {
         MSG(26),
         { type: 'go_to_folder', data: '/' }
     ]);
+}
+
+// ---------------------------------------------------------------------------
+// מיילים לאחרים (שלוחה 1 ← 6) ומשימות / תזכורות (שלוחה 1 ← 5).
+// השרת: routes/features.py (services/customer_mail.py, services/tasks.py).
+// כל ההודעות בהקראה ממוחשבת (SAY) עד שיוקלטו בקריין - ראה services/message_catalog.py
+// ---------------------------------------------------------------------------
+async function featGet(path, phone) {
+    return (await axios.get(`${PYTHON_URL}/api/${path}?phone=${encodeURIComponent(phone)}`, { timeout: 20000 })).data || {};
+}
+async function featPost(path, data, timeout = 60000) {
+    return (await axios.post(`${PYTHON_URL}/api/${path}`, data, { timeout })).data || {};
+}
+
+// הקראת טקסט ארוך בחלקים (הקראה ממוחשבת של ימות מוגבלת באורך)
+function ttsChunks(text, size = 220) {
+    const words = String(text || '').split(/\s+/).filter(Boolean);
+    const out = [];
+    let cur = '';
+    for (const w of words) {
+        if ((cur + ' ' + w).trim().length > size) { if (cur) out.push(TTS(cur)); cur = w; }
+        else cur = (cur + ' ' + w).trim();
+    }
+    if (cur) out.push(TTS(cur));
+    return out.length ? out : [TTS(' ')];
+}
+
+// הקלטה עם אישור: 1 אישור, 2 הקלטה מחדש. מחזיר נתיב בימות או null
+async function recordConfirmed(call, intro) {
+    let fileName = null, recPath = null, prompt = intro;
+    while (true) {
+        const opts = { no_confirm_menu: true, save_on_hangup: false, path: '/recordings' };
+        if (fileName) { opts.file_name = fileName; opts.append_to_existing_file = false; }
+        const got = await call.read([prompt], 'record', opts);
+        if (!recPath) {
+            recPath = (typeof got === 'string' && got) ? got : null;
+            const m = recPath && recPath.match(/([^/]+)\.wav$/i);
+            fileName = m ? m[1] : null;
+        }
+        if (!recPath) return null;
+        const c = await call.read([SAY(263, 'לאישור ההקלטה הקישו 1, להקלטה מחדש הקישו 2')],
+            'tap', { max_digits: 1, digits_allowed: [1, 2] });
+        if (c === '1' || !fileName) return recPath;
+        prompt = MSG(151);   // 151 - הקליטו מחדש לאחר הצליל, בסיום הקישו סולמית
+    }
+}
+
+function noBalanceParts(cost) {
+    return [SAY(264, 'אין מספיק יתרה בארנק. המחיר הוא'), TTS(moneyText(cost)), SAY(265, 'לטעינת ארנק חזרו לתפריט הראשי והקישו 2')];
+}
+
+async function handleEmailOut(call, phone, customer) {
+    liveStage(call, '1 ← 6 · מייל לאיש קשר');
+    while (true) {
+        let menu = {};
+        try { menu = await featGet('email-out/menu', phone); } catch (e) { if (isHangup(e)) throw e; console.error('email-out menu:', e.message); }
+        if (!menu.ok) return await call.id_list_message([SAY(245, 'הפעולה נכשלה'), { type: 'go_to_folder', data: '/' }]);
+        const prompt = [SAY(266, 'לשליחת הודעה במייל הקישו 1')];
+        const allowed = [1, 3, 4, 0];
+        if (menu.replies > 0) {
+            prompt.push(TTS(menu.replies === 1 ? 'יש לכם תגובה חדשה' : `יש לכם ${menu.replies} תגובות חדשות`), SAY(267, 'לשמיעת התגובות הקישו 2'));
+            allowed.push(2);
+        }
+        prompt.push(SAY(268, 'להוספת איש קשר הקישו 3, לקבלת רשימת אנשי הקשר וקישור לניהול שלהם במייל הקישו 4, לחזרה לתפריט הראשי הקישו 0'));
+        const c = await call.read(prompt, 'tap', { max_digits: 1, digits_allowed: allowed });
+        if (c === '0') return await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
+        if (c === '2') { await playEmailReplies(call, phone); continue; }
+        if (c === '3') {
+            const email = await getEmail(call);
+            try {
+                const r = await featPost('email-out/contact', { phone, email });
+                await call.id_list_message([r.ok ? SAY(269, 'איש הקשר נשמר') : SAY(245, 'הפעולה נכשלה')], { prependToNextAction: true });
+            } catch (e) { if (isHangup(e)) throw e; }
+            continue;
+        }
+        if (c === '4') {
+            let r = {};
+            try { r = await featPost('email-out/contacts-link', { phone }); } catch (e) { if (isHangup(e)) throw e; }
+            await call.id_list_message([r.ok ? SAY(270, 'נשלח אליכם מייל עם רשימת אנשי הקשר וקישור לניהול שלהם')
+                                             : SAY(271, 'אין לכם כתובת מייל רשומה במערכת')], { prependToNextAction: true });
+            continue;
+        }
+        return await sendEmailToContact(call, phone, menu);
+    }
+}
+
+async function sendEmailToContact(call, phone, menu) {
+    const contacts = menu.contacts || [];
+    let target = null;   // { contact_id } או { email }
+    if (contacts.length) {
+        const list = [SAY(272, 'בחרו את הנמען')];
+        contacts.slice(0, 20).forEach((c, i) => list.push(TTS(`ל${c.name} הקישו ${i + 1}`)));
+        list.push(SAY(273, 'לכתובת מייל חדשה הקישו 0'));
+        const many = contacts.length > 9;
+        if (many) list.push(SAY(274, 'ובסיום סולמית'));
+        const pick = await call.read(list, 'tap', many ? { max_digits: 2, terminate_keys: ['#'] } : { max_digits: 1, digits_allowed: [...Array(contacts.length + 1).keys()] });
+        const n = parseInt(pick, 10);
+        if (n >= 1 && n <= contacts.length) target = { contact_id: contacts[n - 1].id };
+    }
+    if (!target) target = { email: await getEmail(call) };
+
+    const recPath = await recordConfirmed(call, SAY(275, 'הקליטו את ההודעה לאחר הצליל, ובסיום הקישו סולמית'));
+    if (!recPath) return await call.id_list_message([SAY(245, 'הפעולה נכשלה'), { type: 'go_to_folder', data: '/' }]);
+    let r = {};
+    try {
+        r = await featPost('email-out/send', { phone, call_id: call.ApiCallId, rec_url: yemotDownloadUrl(recPath), ...target });
+    } catch (e) { if (isHangup(e)) throw e; console.error('email-out send:', e.message); }
+    if (r.ok) return await call.id_list_message([SAY(276, 'ההודעה התקבלה, היא תתומלל ותישלח במייל בדקות הקרובות'), { type: 'go_to_folder', data: '/' }]);
+    if (r.error === 'balance') return await call.id_list_message([...noBalanceParts(r.cost), { type: 'go_to_folder', data: '/' }]);
+    return await call.id_list_message([SAY(245, 'הפעולה נכשלה'), { type: 'go_to_folder', data: '/' }]);
+}
+
+async function playEmailReplies(call, phone) {
+    let replies = [];
+    try { replies = (await featGet('email-out/replies', phone)).replies || []; } catch (e) { if (isHangup(e)) throw e; }
+    if (!replies.length) return;
+    const parts = [];
+    replies.forEach((r, i) => parts.push(TTS(`תגובה ${i + 1} מ ${r.from}`), ...ttsChunks(r.body || 'תגובה ריקה')));
+    while (true) {
+        const c = await call.read([...parts, SAY(277, 'לשמיעה חוזרת הקישו 1, להמשך הקישו 0')], 'tap', { max_digits: 1, digits_allowed: [0, 1] });
+        if (c !== '1') break;
+    }
+    try { await featPost('email-out/replies/heard', { phone, ids: replies.map(r => r.id) }); } catch (e) { if (isHangup(e)) throw e; }
+}
+
+async function handleTasks(call, phone, customer) {
+    liveStage(call, '1 ← 5 · משימות');
+    let menu = {};
+    try { menu = await featGet('tasks/menu', phone); } catch (e) { if (isHangup(e)) throw e; console.error('tasks menu:', e.message); }
+    if (!menu.ok) return await call.id_list_message([SAY(245, 'הפעולה נכשלה'), { type: 'go_to_folder', data: '/' }]);
+    const tasks = menu.tasks || [];
+    const prompt = [SAY(280, 'להגדרת משימה חדשה הקישו 1')];
+    const allowed = [1, 0];
+    if (tasks.length) { prompt.push(SAY(281, 'לשמיעת המשימות הפעילות ולביטול הקישו 2')); allowed.push(2); }
+    prompt.push(SAY(282, 'לחזרה לתפריט הראשי הקישו 0'));
+    const c = await call.read(prompt, 'tap', { max_digits: 1, digits_allowed: allowed });
+    if (c === '0') return await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
+    if (c === '2') return await listTasks(call, phone, tasks);
+    return await newTask(call, phone, customer, menu);
+}
+
+async function newTask(call, phone, customer, menu) {
+    let intro = SAY(283, 'הקליטו את המשימה, ואמרו בה מתי לקבל תזכורת. למשל: מחר בשמונה בבוקר, או כל יום בשבע בערב. בסיום הקישו סולמית');
+    while (true) {
+        const recPath = await recordConfirmed(call, intro);
+        if (!recPath) return await call.id_list_message([SAY(245, 'הפעולה נכשלה'), { type: 'go_to_folder', data: '/' }]);
+        let r = {};
+        try {
+            r = await featPost('tasks/create', { phone, call_id: call.ApiCallId, rec_url: yemotDownloadUrl(recPath) }, 90000);
+        } catch (e) { if (isHangup(e)) throw e; console.error('tasks create:', e.message); }
+        if (r.error === 'balance') return await call.id_list_message([...noBalanceParts(r.cost), { type: 'go_to_folder', data: '/' }]);
+        if (!r.ok) { intro = SAY(284, 'לא הצלחנו להבין את ההקלטה. הקליטו שוב לאחר הצליל, ובסיום הקישו סולמית'); continue; }
+        if (!r.has_time) {
+            try { await featPost('tasks/discard', { phone, task_id: r.task_id }); } catch (e) { if (isHangup(e)) throw e; }
+            intro = SAY(285, 'לא זוהה מתי לשלוח את התזכורת. הקליטו שוב ואמרו גם מתי, ובסיום הקישו סולמית');
+            continue;
+        }
+        const ok = await call.read([TTS('המשימה'), ...ttsChunks(r.text), TTS(`התזכורת תישלח ${r.when}`),
+            SAY(286, 'לאישור הקישו 1, להקלטה מחדש הקישו 2, לביטול הקישו 0')], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2] });
+        if (ok !== '1') {
+            try { await featPost('tasks/discard', { phone, task_id: r.task_id }); } catch (e) { if (isHangup(e)) throw e; }
+            if (ok === '0') return await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
+            intro = MSG(151);
+            continue;
+        }
+        const ch = await call.read([SAY(287, 'לקבלת התזכורת במייל הקישו 1, בפקס הקישו 2, בצינתוק והקראה בטלפון הקישו 3'),
+            TTS(`תזכורת בפקס בתוספת ${moneyText(r.fax_price)} לכל שליחה`)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
+        const channel = ch === '1' ? 'email' : ch === '2' ? 'fax' : 'tzintuk';
+        if (channel === 'email' && !r.email) {
+            const email = await getEmail(call);
+            try { await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email }); } catch (e) { if (isHangup(e)) throw e; }
+        }
+        if (channel === 'fax' && !r.fax) {
+            const fax = await call.read([MSG(25)], 'tap', { max_digits: 15, terminate_keys: ['#'] });   // 025 - הקש את מספר הפקס
+            try { await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax }); } catch (e) { if (isHangup(e)) throw e; }
+        }
+        let conf = {};
+        try { conf = await featPost('tasks/confirm', { phone, task_id: r.task_id, channel }); } catch (e) { if (isHangup(e)) throw e; }
+        if (conf.error === 'balance') return await call.id_list_message([...noBalanceParts(conf.cost), { type: 'go_to_folder', data: '/' }]);
+        if (!conf.ok) return await call.id_list_message([SAY(245, 'הפעולה נכשלה'), { type: 'go_to_folder', data: '/' }]);
+        if (conf.tzintuk_folder) {
+            // עוד לא רשום לצינתוק החינמי - מעבר ישיר לאישור ההרשמה בימות
+            return await call.id_list_message([SAY(288, 'המשימה נשמרה. כדי לקבל את הצינתוק בחינם, אשרו עכשיו את ההרשמה לצינתוקים'),
+                { type: 'go_to_folder', data: conf.tzintuk_folder }]);
+        }
+        return await call.id_list_message([SAY(289, 'המשימה נשמרה, תקבלו תזכורת במועד'), { type: 'go_to_folder', data: '/' }]);
+    }
+}
+
+async function listTasks(call, phone, tasks) {
+    for (let i = 0; i < tasks.length; i++) {
+        const t = tasks[i];
+        const c = await call.read([TTS(`משימה ${i + 1}`), ...ttsChunks(t.text), TTS(t.when),
+            SAY(290, 'לביטול המשימה הקישו 9, למשימה הבאה הקישו 1, לחזרה לתפריט הראשי הקישו 0')], 'tap', { max_digits: 1, digits_allowed: [0, 1, 9] });
+        if (c === '0') break;
+        if (c === '9') {
+            let r = {};
+            try { r = await featPost('tasks/cancel', { phone, task_id: t.id }); } catch (e) { if (isHangup(e)) throw e; }
+            await call.id_list_message([r.ok ? SAY(291, 'המשימה בוטלה') : SAY(245, 'הפעולה נכשלה')], { prependToNextAction: true });
+        }
+    }
+    return await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
 }
 
 // ---------------------------------------------------------------------------
