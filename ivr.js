@@ -2109,6 +2109,7 @@ async function recordAndSendEmail(call, phone, target) {
     } catch (e) { if (isHangup(e)) throw e; console.error('email-out send:', e.message); }
     if (r.ok) return await call.id_list_message([SAY(276, 'ההודעה התקבלה, היא תתומלל ותישלח במייל בדקות הקרובות'), { type: 'go_to_folder', data: '/' }]);
     if (r.error === 'balance') return await call.id_list_message([...noBalanceParts(r.cost), { type: 'go_to_folder', data: '/' }]);
+    if (r.error === 'limit') return await call.id_list_message([SAY(300, 'הגעתם למספר המיילים המקסימלי ליממה. נסו שוב מחר'), { type: 'go_to_folder', data: '/' }]);
     return await call.id_list_message([SAY(245, 'הפעולה נכשלה'), { type: 'go_to_folder', data: '/' }]);
 }
 
@@ -2170,6 +2171,7 @@ async function newTask(call, phone, customer, menu) {
             r = await featPost('tasks/create', { phone, call_id: call.ApiCallId, rec_url: yemotDownloadUrl(recPath) }, 90000);
         } catch (e) { if (isHangup(e)) throw e; console.error('tasks create:', e.message); }
         if (r.error === 'balance') return await call.id_list_message([...noBalanceParts(r.cost), { type: 'go_to_folder', data: '/' }]);
+        if (r.error === 'limit') return await call.id_list_message([SAY(301, 'הגעתם למספר המשימות הפעילות המקסימלי. בטלו משימה כדי להוסיף חדשה'), { type: 'go_to_folder', data: '/' }]);
         if (!r.ok) { intro = SAY(284, 'לא הצלחנו להבין את ההקלטה. הקליטו שוב לאחר הצליל, ובסיום הקישו סולמית'); continue; }
         if (!r.has_time) {
             try { await featPost('tasks/discard', { phone, task_id: r.task_id }); } catch (e) { if (isHangup(e)) throw e; }
