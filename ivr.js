@@ -2125,7 +2125,9 @@ async function playEmailReplies(call, phone) {
         if (r.new && !heard.includes(r.id)) heard.push(r.id);
         const opts = r.can_reply ? SAY(277, 'לתגובה הבאה הקישו 1, לשמיעה חוזרת הקישו 2, למענה על התגובה הקישו 3, לחזרה לתפריט הקישו 0')
                                  : SAY(279, 'לתגובה הבאה הקישו 1, לשמיעה חוזרת הקישו 2, לחזרה לתפריט הקישו 0');
-        const c = await call.read([TTS(`${r.new ? 'תגובה חדשה' : 'תגובה'} מ ${r.from}`), ...ttsChunks(r.body || 'תגובה ריקה'), opts],
+        // לפני התוכן: ממי, ותאריך ושעת התגובה
+        const head = `${r.new ? 'תגובה חדשה' : 'תגובה'} מ ${r.from}${r.when ? ', ' + r.when : ''}`;
+        const c = await call.read([TTS(head), ...ttsChunks(r.body || 'תגובה ריקה'), opts],
             'tap', { max_digits: 1, digits_allowed: r.can_reply ? [0, 1, 2, 3] : [0, 1, 2] });
         if (c === '2') { i--; continue; }
         if (c === '3' && r.can_reply) {
