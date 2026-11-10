@@ -2880,12 +2880,13 @@ async function adminMenuLoop(call, token) {
     liveStage(call, '0 · תפריט מנהל');
     // 094 - לשמיעת הודעות הקש 1, למעבר לשלוחה 59 הקש 2, להקלטה עם עריכה הקש 3 (יש להקליט מחדש)
     const choice = token
-        ? await call.read([SAY(238, 'לשמיעת הודעות לפי מספר הקישו 1, למעבר לשלוחה 59 הקישו 2, להקלטה עם עריכה הקישו 3, למספר ההודעות הממתינות הקישו 4, ליתרת לקוח וזיכוי הקישו 5, לתוצאות הפקודות מנדרים פלוס הקישו 6, להוראות הפקודות הקישו 7')],
-            'tap', { max_digits: 1, digits_allowed: [1, 2, 3, 4, 5, 6, 7] })
+        ? await call.read([SAY(238, 'לשמיעת הודעות לפי מספר הקישו 1, למעבר לשלוחה 59 הקישו 2, להקלטה עם עריכה הקישו 3, למספר ההודעות הממתינות הקישו 4, ליתרת לקוח וזיכוי הקישו 5, לתוצאות הפקודות מנדרים פלוס הקישו 6, להוראות הפקודות הקישו 7, למשימות ולו"ז הקישו 8')],
+            'tap', { max_digits: 1, digits_allowed: [1, 2, 3, 4, 5, 6, 7, 8] })
         : await call.read([MSG(94)], 'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
 
     if (token && choice === '4') return await adminPendingSummary(call, token);
     if (token && choice === '5') return await adminCustomerBalance(call, token);
+    if (token && choice === '8') return await adminTasksMenu(call, token);
     if (token && (choice === '6' || choice === '7')) return await adminSayFromServer(call, token, choice === '6' ? 'commands' : 'help');
 
     if (choice === '2') {
@@ -2936,6 +2937,47 @@ async function adminSayFromServer(call, token, what) {
         await call.id_list_message([SAY(245, 'הפעולה נכשלה')], { prependToNextAction: true });
     }
     return await adminMenuLoop(call, token);
+}
+
+// 8 = משימות ולו"ז של המנהל (services/admin_tasks.py): הקלטת משימה, ושמיעת הלו"ז להיום/מחר
+async function adminTasksMenu(call, token) {
+    liveStage(call, '0 · משימות מנהל');
+    const c = await call.read([SAY(302, 'להקלטת משימה חדשה הקישו 1, ללו"ז של היום הקישו 2, ללו"ז של מחר הקישו 3, לחזרה לתפריט המנהל הקישו 0')],
+        'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
+    if (c === '2' || c === '3') {
+        try {
+            const r = await adminApi('tasks/agenda', { token, call_id: call.ApiCallId, day: c === '3' ? 1 : 0 });
+            if (!r.ok) throw new Error(r.reason || 'error');
+            await call.id_list_message(ttsChunks(r.text), { prependToNextAction: true });
+        } catch (e) {
+            if (isHangup(e)) throw e;
+            console.error('admin agenda error:', e.message);
+            await call.id_list_message([SAY(245, 'הפעולה נכשלה')], { prependToNextAction: true });
+        }
+        return await adminTasksMenu(call, token);
+    }
+    if (c !== '1') return await adminMenuLoop(call, token);
+    let intro = SAY(303, 'הקליטו את המשימה. אם יש לה מועד, אמרו מתי. למשל: מחר בעשר בבוקר. בסיום הקישו סולמית');
+    while (true) {
+        const recPath = await recordConfirmed(call, intro);
+        if (!recPath) break;
+        let r = {};
+        try {
+            r = (await axios.post(`${PYTHON_URL}/api/admin-phone/tasks/create`,
+                { token, call_id: call.ApiCallId, rec_url: yemotDownloadUrl(recPath) }, { timeout: 90000 })).data || {};
+        } catch (e) { if (isHangup(e)) throw e; console.error('admin task create:', e.message); }
+        if (!r.ok) { intro = SAY(284, 'לא הצלחנו להבין את ההקלטה. הקליטו שוב לאחר הצליל, ובסיום הקישו סולמית'); continue; }
+        const ok = await call.read([TTS('המשימה'), ...ttsChunks(r.text), TTS(r.when),
+            SAY(304, 'לאישור הקישו 1, להקלטה מחדש הקישו 2, לביטול הקישו 0')], 'tap', { max_digits: 1, digits_allowed: [0, 1, 2] });
+        if (ok === '1') {
+            await call.id_list_message([SAY(305, 'המשימה נשמרה בלו"ז')], { prependToNextAction: true });
+            break;
+        }
+        try { await adminApi('tasks/cancel', { token, call_id: call.ApiCallId, id: r.id }); } catch (e) { if (isHangup(e)) throw e; }
+        if (ok === '0') break;
+        intro = MSG(151);
+    }
+    return await adminTasksMenu(call, token);
 }
 
 async function adminCustomerBalance(call, token) {
