@@ -2942,11 +2942,12 @@ async function adminSayFromServer(call, token, what) {
 // 8 = משימות ולו"ז של המנהל (services/admin_tasks.py): הקלטת משימה, ושמיעת הלו"ז להיום/מחר
 async function adminTasksMenu(call, token) {
     liveStage(call, '0 · משימות מנהל');
-    const c = await call.read([SAY(302, 'להקלטת משימה חדשה הקישו 1, ללו"ז של היום הקישו 2, ללו"ז של מחר הקישו 3, לחזרה לתפריט המנהל הקישו 0')],
-        'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3] });
-    if (c === '2' || c === '3') {
+    const c = await call.read([SAY(302, 'להקלטת משימה חדשה הקישו 1, ללו"ז של היום הקישו 2, ללו"ז של מחר הקישו 3, לדוח המשימות של השבוע הקישו 4, לחזרה לתפריט המנהל הקישו 0')],
+        'tap', { max_digits: 1, digits_allowed: [0, 1, 2, 3, 4] });
+    if (c === '2' || c === '3' || c === '4') {
         try {
-            const r = await adminApi('tasks/agenda', { token, call_id: call.ApiCallId, day: c === '3' ? 1 : 0 });
+            const r = c === '4' ? await adminApi('tasks/week', { token, call_id: call.ApiCallId })
+                : await adminApi('tasks/agenda', { token, call_id: call.ApiCallId, day: c === '3' ? 1 : 0 });
             if (!r.ok) throw new Error(r.reason || 'error');
             await call.id_list_message(ttsChunks(r.text), { prependToNextAction: true });
         } catch (e) {
