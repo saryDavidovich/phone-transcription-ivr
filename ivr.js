@@ -1158,6 +1158,7 @@ router.get('/phone-edit', async (call) => {
         await call.id_list_message([...parts, { type: 'go_to_folder', data: '/' }]);
         return;
     }
+    if (!chk.has_target) await askDeliveryTarget(call, call.ApiPhone);
     await handlePhoneEditRecording(call, call.ApiPhone);
 });
 
@@ -1829,6 +1830,7 @@ async function handleRecording(call, phone, customer) {
         catch (e) { if (isHangup(e)) throw e; console.error('phone-edit check:', e.message); }
         if (chk.error === 'balance') return await call.id_list_message([...noBalanceParts(chk.cost), { type: 'go_to_folder', data: '/' }]);
         if (!chk.ok) return await call.id_list_message([SAY(245, 'הפעולה נכשלה'), { type: 'go_to_folder', data: '/' }]);
+        if (!chk.has_target) await askDeliveryTarget(call, phone);   // אין מייל/פקס - שואלים לפני ההקלטה (כמו באקסל)
         return await call.id_list_message([{ type: 'go_to_folder', data: PHONE_EDIT_FOLDER }]);
     }
     if (tierChoice === '5' && tasksOn) return await handleTasks(call, phone, customer);
@@ -2434,6 +2436,20 @@ async function excelTemplateMenu(call, phone, customer, t) {
         }
         await excelRecord(call, phone, customer, t, mode);
         return true;
+    }
+}
+
+// לקוח בלי מייל ופקס: לאן לשלוח (כמו בהקלטה רגילה ובאקסל) - נשמר בכרטיס הלקוח
+async function askDeliveryTarget(call, phone) {
+    // 024 - לשליחה למייל הקש 1, לשליחה לפקס הקש 2
+    const deliveryChoice = await call.read([MSG(24)], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    if (deliveryChoice === '1') {
+        const email = await getEmail(call);
+        try { await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, email, delivery_method: 'email' }); } catch (e) { if (isHangup(e)) throw e; }
+    } else {
+        // 025 - הקש את מספר הפקס שלך, ולאחר מכן הקש סולמית
+        const fax = await call.read([MSG(25)], 'tap', { max_digits: 15, terminate_keys: ['#'] });
+        try { await axios.post(`${PYTHON_URL}/api/customer/update`, { phone, fax, delivery_method: 'fax' }); } catch (e) { if (isHangup(e)) throw e; }
     }
 }
 
