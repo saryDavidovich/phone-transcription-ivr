@@ -652,7 +652,9 @@ async function resendDocument(call, phone, d) {
 // כך שכל מקש עוצר את ההקלטה. מיד אחרי העצירה נפתח "חלון" של 2 שניות להקשה:
 //   סולמית ואז ספרה (למשל #2)  -> מבוצעת הפעולה, וההקלטה ממשיכה מיד (קטע חדש)
 //   סולמית ואז כוכבית (#*)     -> תפריט העריכה (הודעה 179)
-//   סולמית ואז כלום (2 שניות)  -> סיום ושליחה לתמלול
+//   סולמית ואז אפס               -> גם תפריט העריכה
+//   סולמית ואז כלום (2 שניות)  -> תפריט השהיה (313): המשך / מקשי העריכה / סיום ושליחה
+// לפני ההקלטה (308): התחלה / הוראות מלאות בקול (309-311) / הוראות במייל
 // כל קטע נשמר כקובץ נפרד בתיקייה /recordings_edit, והשרת מתמלל קטע-קטע (OpenAI)
 // ומכניס את העיצוב בדיוק בגבול בין הקטעים. ניתוק = שליחה של מה שהוקלט עד אז.
 // ---------------------------------------------------------------------------
@@ -705,6 +707,30 @@ async function handlePhoneEditRecording(call, phone) {
         log(`ACTION key=${JSON.stringify(key)} -> state ${JSON.stringify(st)}`);
     };
 
+    // לפני ההקלטה: התחלה / הוראות מלאות בקול / הוראות במייל
+    while (true) {
+        const c = await call.read([SAY(308, 'להתחלת ההקלטה הקישו 1, לשמיעת ההוראות המלאות הקישו 2, לקבלת ההוראות במייל הקישו 3')],
+            'tap', { max_digits: 1, digits_allowed: [1, 2, 3] });
+        log(`PRE-MENU ${JSON.stringify(c)}`);
+        if (c === '2') {
+            await call.id_list_message([
+                SAY(309, 'בהקלטה עם עריכה אתם מקליטים, ותוך כדי מוסיפים עיצוב. כדי להוסיף עיצוב, הקישו סולמית ומיד אחריה ספרה, וההקלטה ממשיכה לבד.'),
+                SAY(310, 'סולמית ואחת: ירידת שורה. סולמית ושתיים: הדגשה, ושוב לסיום ההדגשה. סולמית ושלוש: קו תחתון, ושוב לסיום. סולמית וארבע: סוגריים מרובעים, ושוב לסגירה. סולמית וחמש: סוגריים עגולים, ושוב לסגירה.'),
+                SAY(311, 'סולמית ושש: מקף. סולמית ושבע: נקודתיים. סולמית ושמונה: סימן שאלה. סולמית ותשע: מירכאות. סולמית ואפס: רשימת המקשים. סולמית בלבד עוצרת את ההקלטה, ואז אפשר להמשיך, לשמוע את המקשים, או לסיים ולשלוח לתמלול.')
+            ], { prependToNextAction: true });
+            continue;
+        }
+        if (c === '3') {
+            let r = {};
+            try { r = (await axios.post(`${PYTHON_URL}/api/phone-edit/instructions-email`, { phone })).data || {}; }
+            catch (e) { if (isHangup(e)) throw e; console.error('phone-edit instructions email:', e.message); }
+            await call.id_list_message([r.ok ? SAY(312, 'ההוראות נשלחו למייל שלכם') : (r.error === 'no_email' ? MSG(171) : SAY(245, 'הפעולה נכשלה'))],
+                { prependToNextAction: true });
+            continue;
+        }
+        break;
+    }
+
     try {
         while (true) {
             recNo++;
@@ -735,7 +761,20 @@ async function handlePhoneEditRecording(call, phone) {
             };
             let actionKey = await readKey('AFTER-STOP-1');
             if (!actionKey) actionKey = await readKey('AFTER-STOP-2');
-            if (!actionKey) break;                       // סולמית ואז כלום -> סיום ושליחה
+            if (!actionKey) {
+                // סולמית ואז כלום -> לא מסיימים בשקט: תפריט השהיה (המשך / מקשי העריכה / סיום ושליחה)
+                let p = null;
+                for (let tries = 0; tries < 2 && !p; tries++) {
+                    p = await call.read([SAY(313, 'ההקלטה בהשהיה. להמשך ההקלטה הקישו 1, לשמיעת מקשי העריכה הקישו 2, לסיום ושליחה לתמלול הקישו 3')],
+                        'tap', { max_digits: 1, digits_allowed: [1, 2, 3], sec_wait: 10, allow_empty: true, empty_val: 'NONE' });
+                    if (p === 'NONE') p = null;
+                }
+                log(`PAUSE-MENU ${JSON.stringify(p)}`);
+                if (!p || p === '3') break;              // סיום ושליחה (או בלי תשובה פעמיים)
+                if (p === '1') continue;                 // המשך הקלטה בלי פעולה
+                actionKey = '*';                         // 2 - מקשי העריכה
+            }
+            if (actionKey === '0') actionKey = '*';      // סולמית ואפס - גם תפריט המקשים (אם כוכבית לא עוברת)
 
             if (actionKey === '*') {
                 actionKey = await call.read([MSG(179)], 'tap', {   // 179 - תפריט העריכה
