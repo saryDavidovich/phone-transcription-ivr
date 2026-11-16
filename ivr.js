@@ -647,7 +647,7 @@ async function resendDocument(call, phone, d) {
 }
 
 // ---------------------------------------------------------------------------
-// "הקלטה עם עריכה" (ניסיוני - כרגע רק מתפריט המנהל, הקש 3).
+// "הקלטה עם עריכה" - שלוחה 1 ← 4 ללקוחות (בחיוב, מחיר כמו אקסל כברירת מחדל), וגם מתפריט המנהל (3).
 // רץ בשלוחת API נפרדת בימות (PHONE_EDIT_FOLDER) שבה מוגדר record_stop_any_key=yes,
 // כך שכל מקש עוצר את ההקלטה. מיד אחרי העצירה נפתח "חלון" של 2 שניות להקשה:
 //   סולמית ואז ספרה (למשל #2)  -> מבוצעת הפעולה, וההקלטה ממשיכה מיד (קטע חדש)
@@ -1149,9 +1149,13 @@ router.get('/', async (call) => {
 
 // שלוחת "הקלטה עם עריכה" בימות (PHONE_EDIT_FOLDER) - api_link שלה מצביע לכאן
 router.get('/phone-edit', async (call) => {
-    const ADMIN_PHONE = '0527134491';
-    if (call.ApiPhone !== ADMIN_PHONE) {   // בינתיים רק המנהל
-        await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
+    // פתוח ללקוחות (כשמופעל בהגדרות) - השרת בודק: מותר, רשום, יש יתרה ליחידה אחת
+    let chk = {};
+    try { chk = (await axios.get(`${PYTHON_URL}/api/phone-edit/check`, { params: { phone: call.ApiPhone } })).data || {}; }
+    catch (e) { if (isHangup(e)) throw e; console.error('phone-edit check:', e.message); }
+    if (!chk.ok) {
+        const parts = chk.error === 'balance' ? noBalanceParts(chk.cost) : [];
+        await call.id_list_message([...parts, { type: 'go_to_folder', data: '/' }]);
         return;
     }
     await handlePhoneEditRecording(call, call.ApiPhone);
@@ -1718,7 +1722,7 @@ async function handleManagerMessage(call, phone, customer, opts = {}) {
     ]);
 }
 
-const featureFlags = { mail: false, tasks: false };
+const featureFlags = { mail: false, tasks: false, excel: true, phoneEdit: true };
 
 async function handleRecording(call, phone, customer) {
     liveStage(call, '1 · הקלטה לתמלול');
@@ -1732,6 +1736,8 @@ async function handleRecording(call, phone, customer) {
         pricePremium = parseFloat(settingsRes.data.price_per_20min_premium || 1.90);
         featureFlags.mail = settingsRes.data.email_out_enabled === '1';
         featureFlags.tasks = settingsRes.data.tasks_enabled === '1';
+        featureFlags.excel = settingsRes.data.excel_enabled !== '0';
+        featureFlags.phoneEdit = settingsRes.data.phone_edit_enabled !== '0';
     } catch (e) {
         console.error('could not fetch settings:', e.message);
     }
@@ -1788,27 +1794,36 @@ async function handleRecording(call, phone, customer) {
     }
 
     // 015 - לתמלול רגיל הקש 1 לתמלול מקצועי הקש 2, 083 - הכרזת מחיר, ואז הלקוח בוחר
-    // 3 - טבלאות אקסל: פתוח לכל הלקוחות (לבודקים שיודעים עליו), אבל ההכרזה "הקישו 3"
-    // נשמעת רק למנהל - לקוחות רגילים לא שומעים עליו. כשההודעות יוקלטו - להשמיע לכולם
-    // ולעדכן את הודעה 015.
-    const excelAnnounce = phone === '0527134491';
-    // 5 - משימות ותזכורות, 6 - הודעה במייל לאיש קשר: כבויות בהגדרות = רק המנהל שומע ויכול להקיש
+    // 3 - טבלאות אקסל, 4 - הקלטה עם עריכה, 5 - משימות ותזכורות, 6 - הודעה במייל לאיש קשר:
+    // כל אחת נדלקת/נכבית בהגדרות בממשק. כבויה = רק המנהל שומע ויכול להקיש.
     const isAdminPhone = phone === '0527134491';
+    const excelOn = isAdminPhone || featureFlags.excel;
+    const phoneEditOn = isAdminPhone || featureFlags.phoneEdit;
     const tasksOn = isAdminPhone || featureFlags.tasks;
     const mailOn = isAdminPhone || featureFlags.mail;
     const featAnnounce = [];
+    if (excelOn) featAnnounce.push(SAY(206, 'ליצירת טבלאות אקסל הקישו 3'));
+    if (phoneEditOn) featAnnounce.push(SAY(306, 'להקלטה עם עריכה - הדגשות, קו תחתון וסוגריים, שמגיעה כקובץ וורד - הקישו 4'));
     if (tasksOn) featAnnounce.push(SAY(261, 'למשימות ותזכורות הקישו 5'));
     if (mailOn) featAnnounce.push(SAY(262, 'לשליחת הודעה במייל לאיש קשר הקישו 6'));
     // 083 - הכרזת המחיר (ל-20 דקות). לקוח בחיוב לפי 5 דקות שומע את המחיר שלו בהקראה ממוחשבת
     const priceAnnounce = per5
         ? [SAY(204, 'המחיר לכל 5 דקות: תמלול רגיל'), TTS(moneyText(priceBasic)), SAY(205, 'תמלול מקצועי'), TTS(moneyText(pricePremium))]
         : [MSG(83)];
-    const tierChoice = await call.read(
-        excelAnnounce ? [MSG(15), ...priceAnnounce, SAY(206, 'ליצירת טבלאות אקסל הקישו 3'), ...featAnnounce] : [MSG(15), ...priceAnnounce, ...featAnnounce],
-        'tap', { max_digits: 1, digits_allowed: [1, 2, 3].concat(tasksOn ? [5] : [], mailOn ? [6] : []) });
-    if (tierChoice === '3') {
+    const tierChoice = await call.read([MSG(15), ...priceAnnounce, ...featAnnounce],
+        'tap', { max_digits: 1, digits_allowed: [1, 2].concat(excelOn ? [3] : [], phoneEditOn ? [4] : [], tasksOn ? [5] : [], mailOn ? [6] : []) });
+    if (tierChoice === '3' && excelOn) {
         await handleExcel(call, phone, customer);
         return;
+    }
+    if (tierChoice === '4' && phoneEditOn) {
+        // בדיקת יתרה (יחידה אחת) ואז מעבר לשלוחת "הקלטה עם עריכה" בימות
+        let chk = {};
+        try { chk = (await axios.get(`${PYTHON_URL}/api/phone-edit/check`, { params: { phone } })).data || {}; }
+        catch (e) { if (isHangup(e)) throw e; console.error('phone-edit check:', e.message); }
+        if (chk.error === 'balance') return await call.id_list_message([...noBalanceParts(chk.cost), { type: 'go_to_folder', data: '/' }]);
+        if (!chk.ok) return await call.id_list_message([SAY(245, 'הפעולה נכשלה'), { type: 'go_to_folder', data: '/' }]);
+        return await call.id_list_message([{ type: 'go_to_folder', data: PHONE_EDIT_FOLDER }]);
     }
     if (tierChoice === '5' && tasksOn) return await handleTasks(call, phone, customer);
     if (tierChoice === '6' && mailOn) return await handleEmailOut(call, phone, customer);
