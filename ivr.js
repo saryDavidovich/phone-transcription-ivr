@@ -1810,7 +1810,13 @@ async function handleRecording(call, phone, customer) {
     const priceAnnounce = per5
         ? [SAY(204, 'המחיר לכל 5 דקות: תמלול רגיל'), TTS(moneyText(priceBasic)), SAY(205, 'תמלול מקצועי'), TTS(moneyText(pricePremium))]
         : [MSG(83)];
-    const tierChoice = await call.read([MSG(15), ...priceAnnounce, ...featAnnounce],
+    // כל האפשרויות דלוקות - הודעה אחת ארוכה (307) עם כל התפריט. אחת כבויה - החלקים הנפרדים,
+    // כדי שלקוח לא ישמע על מקש שלא עובד
+    const allOn = excelOn && phoneEditOn && tasksOn && mailOn;
+    const menuParts = allOn
+        ? [SAY(307, 'לתמלול רגיל הקישו 1, לתמלול מקצועי הקישו 2, ליצירת טבלאות אקסל הקישו 3, להקלטה עם עריכה הקישו 4, למשימות ותזכורות הקישו 5, לשליחת הודעה במייל לאיש קשר הקישו 6'), ...priceAnnounce]
+        : [MSG(15), ...priceAnnounce, ...featAnnounce];
+    const tierChoice = await call.read(menuParts,
         'tap', { max_digits: 1, digits_allowed: [1, 2].concat(excelOn ? [3] : [], phoneEditOn ? [4] : [], tasksOn ? [5] : [], mailOn ? [6] : []) });
     if (tierChoice === '3' && excelOn) {
         await handleExcel(call, phone, customer);
