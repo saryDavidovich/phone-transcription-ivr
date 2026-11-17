@@ -1788,8 +1788,8 @@ async function handleRecording(call, phone, customer) {
     }
 
     const minPrice = Math.min(priceBasic, pricePremium);
-    // מבצע דקות חינם פעיל עם דקות שנותרו היום - אפשר להיכנס גם בלי יתרה (תמלול רגיל בלבד)
-    const promoAvailable = customer && (parseInt(customer.promo_free_left, 10) || 0) > 0;
+    // מבצע "הקלטה ראשונה ביום חינם" - אם בהגדרות "כל אחד, גם בלי יתרה": אפשר להיכנס בלי יתרה (תמלול רגיל בלבד)
+    const promoAvailable = customer && (parseInt(customer.promo_free_left, 10) || 0) > 0 && customer.promo_needs_balance === false;
 
     if (balance < minPrice && !promoAvailable) {
         if (balance <= 0) {
@@ -1879,15 +1879,17 @@ async function handleRecording(call, phone, customer) {
 
     const requiredPrice = transcriptionTier === 'premium' ? pricePremium : priceBasic;
 
-    // מבצע דקות חינם (תמלול רגיל): נותרו דקות להיום - אין צורך ביתרה, ומודיעים כמה נשארו
+    // מבצע "הקלטה ראשונה ביום חינם" (תמלול רגיל): מודיעים על הדקות החינמיות; אם המבצע גם למי שאין לו
+    // יתרה (promo_needs_balance=false) - לא חוסמים על יתרה
     const promoLeft = transcriptionTier !== 'premium' && customer ? (parseInt(customer.promo_free_left, 10) || 0) : 0;
     if (promoLeft > 0) {
         const promoMin = Math.max(1, Math.floor(promoLeft / 60));
-        await call.id_list_message([SAY(315, 'במסגרת המבצע נותרו לכם היום'), TTS(String(promoMin)),
-            SAY(316, 'דקות של תמלול רגיל בחינם')], { prependToNextAction: true });
+        await call.id_list_message([SAY(315, 'במסגרת המבצע, ההקלטה הראשונה שלכם היום חינם, עד'), TTS(String(promoMin)),
+            SAY(316, 'דקות')], { prependToNextAction: true });
     }
+    const promoNoBalanceOk = promoLeft > 0 && customer.promo_needs_balance === false;
 
-    if (balance < requiredPrice && promoLeft <= 0) {
+    if (balance < requiredPrice && !promoNoBalanceOk) {
         const balanceShekel = Math.floor(balance);
         const balanceAgorot = Math.round((balance - balanceShekel) * 100);
         const balanceStr = balanceAgorot > 0
