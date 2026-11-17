@@ -1788,8 +1788,10 @@ async function handleRecording(call, phone, customer) {
     }
 
     const minPrice = Math.min(priceBasic, pricePremium);
+    // מבצע דקות חינם פעיל עם דקות שנותרו היום - אפשר להיכנס גם בלי יתרה (תמלול רגיל בלבד)
+    const promoAvailable = customer && (parseInt(customer.promo_free_left, 10) || 0) > 0;
 
-    if (balance < minPrice) {
+    if (balance < minPrice && !promoAvailable) {
         if (balance <= 0) {
             await call.id_list_message([
                 // 012 - מצטערים, אין יתרה בארנק שלך, לטעינת ארנק חזור לתפריט הראשי והקש 2, שיחה טובה
@@ -1877,7 +1879,15 @@ async function handleRecording(call, phone, customer) {
 
     const requiredPrice = transcriptionTier === 'premium' ? pricePremium : priceBasic;
 
-    if (balance < requiredPrice) {
+    // מבצע דקות חינם (תמלול רגיל): נותרו דקות להיום - אין צורך ביתרה, ומודיעים כמה נשארו
+    const promoLeft = transcriptionTier !== 'premium' && customer ? (parseInt(customer.promo_free_left, 10) || 0) : 0;
+    if (promoLeft > 0) {
+        const promoMin = Math.max(1, Math.floor(promoLeft / 60));
+        await call.id_list_message([SAY(315, 'במסגרת המבצע נותרו לכם היום'), TTS(String(promoMin)),
+            SAY(316, 'דקות של תמלול רגיל בחינם')], { prependToNextAction: true });
+    }
+
+    if (balance < requiredPrice && promoLeft <= 0) {
         const balanceShekel = Math.floor(balance);
         const balanceAgorot = Math.round((balance - balanceShekel) * 100);
         const balanceStr = balanceAgorot > 0
