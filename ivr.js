@@ -1782,7 +1782,6 @@ async function handleRecording(call, phone, customer) {
         console.error('could not fetch settings:', e.message);
     }
     // מחירון אישי של הלקוח (לפי 20 או לפי 5 דקות - נקבע בכרטיס הלקוח בממשק)
-    const per5 = customer && customer.billing_unit === 5;
     if (customer && customer.unit_prices) {
         priceBasic = parseFloat(customer.unit_prices.basic) || priceBasic;
         pricePremium = parseFloat(customer.unit_prices.premium) || pricePremium;
@@ -1833,7 +1832,8 @@ async function handleRecording(call, phone, customer) {
         }
     }
 
-    // 015 - לתמלול רגיל הקש 1 לתמלול מקצועי הקש 2, 083 - הכרזת מחיר, ואז הלקוח בוחר
+    // 015 - לתמלול רגיל הקש 1 לתמלול מקצועי הקש 2, ואז הלקוח בוחר. המחירים כבר לא מוקראים כאן -
+    // במקומם 314: "למעבר לשמיעת המחירון הקישו 9" (מעביר למחירון, כמו שלוחה 2 ← 3)
     // 3 - טבלאות אקסל, 4 - הקלטה עם עריכה, 5 - משימות ותזכורות, 6 - הודעה במייל לאיש קשר:
     // כל אחת נדלקת/נכבית בהגדרות בממשק. כבויה = רק המנהל שומע ויכול להקיש.
     const isAdminPhone = phone === '0527134491';
@@ -1846,10 +1846,7 @@ async function handleRecording(call, phone, customer) {
     if (phoneEditOn) featAnnounce.push(SAY(306, 'להקלטה עם עריכה - הדגשות, קו תחתון וסוגריים, שמגיעה כקובץ וורד - הקישו 4'));
     if (tasksOn) featAnnounce.push(SAY(261, 'למשימות ותזכורות הקישו 5'));
     if (mailOn) featAnnounce.push(SAY(262, 'לשליחת הודעה במייל לאיש קשר הקישו 6'));
-    // 083 - הכרזת המחיר (ל-20 דקות). לקוח בחיוב לפי 5 דקות שומע את המחיר שלו בהקראה ממוחשבת
-    const priceAnnounce = per5
-        ? [SAY(204, 'המחיר לכל 5 דקות: תמלול רגיל'), TTS(moneyText(priceBasic)), SAY(205, 'תמלול מקצועי'), TTS(moneyText(pricePremium))]
-        : [MSG(83)];
+    const priceAnnounce = [SAY(314, 'למעבר לשמיעת המחירון הקישו 9')];
     // כל האפשרויות דלוקות - הודעה אחת ארוכה (307) עם כל התפריט. אחת כבויה - החלקים הנפרדים,
     // כדי שלקוח לא ישמע על מקש שלא עובד
     const allOn = excelOn && phoneEditOn && tasksOn && mailOn;
@@ -1857,7 +1854,8 @@ async function handleRecording(call, phone, customer) {
         ? [SAY(307, 'לתמלול רגיל הקישו 1, לתמלול מקצועי הקישו 2, ליצירת טבלאות אקסל הקישו 3, להקלטה עם עריכה הקישו 4, למשימות ותזכורות הקישו 5, לשליחת הודעה במייל לאיש קשר הקישו 6'), ...priceAnnounce]
         : [MSG(15), ...priceAnnounce, ...featAnnounce];
     const tierChoice = await call.read(menuParts,
-        'tap', { max_digits: 1, digits_allowed: [1, 2].concat(excelOn ? [3] : [], phoneEditOn ? [4] : [], tasksOn ? [5] : [], mailOn ? [6] : []) });
+        'tap', { max_digits: 1, digits_allowed: [1, 2, 9].concat(excelOn ? [3] : [], phoneEditOn ? [4] : [], tasksOn ? [5] : [], mailOn ? [6] : []) });
+    if (tierChoice === '9') return await handlePriceList(call, phone);   // המחירון (שלוחה 2 ← 3)
     if (tierChoice === '3' && excelOn) {
         await handleExcel(call, phone, customer);
         return;
