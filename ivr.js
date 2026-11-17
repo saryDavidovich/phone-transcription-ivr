@@ -1875,7 +1875,16 @@ async function handleRecording(call, phone, customer) {
     if (tierChoice === '5' && tasksOn) return await handleTasks(call, phone, customer);
     if (tierChoice === '6' && mailOn) return await handleEmailOut(call, phone, customer);
 
-    const transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
+    let transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
+
+    // בחר מקצועי בלי מספיק יתרה, אבל יש לו הקלטה חינם במבצע (תמלול רגיל) - מציעים לעבור לרגיל
+    if (transcriptionTier === 'premium' && balance < pricePremium && customer
+            && (parseInt(customer.promo_free_left, 10) || 0) > 0) {
+        const sw = await call.read([SAY(317, 'במסגרת המבצע, תמלול רגיל חינם בהקלטה הראשונה שלכם היום. לבחירה בתמלול רגיל הקישו 1, לחזרה לתפריט הראשי הקישו 0')],
+            'tap', { max_digits: 1, digits_allowed: [0, 1] });
+        if (sw !== '1') return await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
+        transcriptionTier = 'gemini';
+    }
 
     const requiredPrice = transcriptionTier === 'premium' ? pricePremium : priceBasic;
 
