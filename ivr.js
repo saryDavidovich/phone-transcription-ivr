@@ -1234,6 +1234,11 @@ async function presentMainMenu(call, phone) {
         console.error('customer error:', e.message);
     }
 
+    // בקשה מהאזור האישי באתר לצרף את המספר הזה לחשבון - רק כשמתקשרים מהמספר עצמו (לא בכניסת תלמיד)
+    if (customer && customer.phone_link && phone === call.ApiPhone) {
+        customer = await handlePhoneLink(call, phone, customer);
+    }
+
     const balance = customer ? parseFloat(customer.balance || 0) : 0;
     const balanceShekel = Math.floor(balance);
     const balanceAgorot = Math.round((balance - balanceShekel) * 100);
@@ -1357,6 +1362,34 @@ async function presentMainMenu(call, phone) {
         await handleAdminMenu(call);
     } else {
         await handleOptions(call, phone);
+    }
+}
+
+// --- צירוף המספר לחשבון באתר (services/phone_link.py בשרת) ---
+async function handlePhoneLink(call, phone, customer) {
+    liveStage(call, 'צירוף מספר לחשבון באתר');
+    const ans = await call.read([
+        SAY(318, 'התקבלה בקשה מהאזור האישי באתר, לצרף את מספר הטלפון הזה לחשבון שלכם'),
+        SAY(319, 'לאישור הקישו 1, לדחייה הקישו 2'),
+    ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    let result = '';
+    try {
+        result = (await axios.post(`${PYTHON_URL}/api/phone-link/confirm`,
+            { phone, id: customer.phone_link.id, accept: ans === '1' ? '1' : '0' })).data.result;
+    } catch (e) {
+        if (isHangup(e)) throw e;
+        console.error('phone link confirm error:', e.message);
+    }
+    const msg = result === 'done' ? SAY(320, 'המספר צורף לחשבון בהצלחה. מעכשיו ההקלטות מהמספר הזה יופיעו גם באתר')
+        : result === 'conflict' ? SAY(321, 'המספר הזה כבר רשום אצלנו לחשבון אחר, ולכן הוא לא צורף. לפרטים כתבו לנו דרך האתר')
+        : result === 'rejected' ? SAY(322, 'הבקשה בוטלה')
+        : SAY(245, 'הפעולה נכשלה');
+    await call.id_list_message([msg], { prependToNextAction: true });
+    try {
+        return (await axios.get(`${PYTHON_URL}/api/customer/${phone}`)).data;
+    } catch (e) {
+        if (isHangup(e)) throw e;
+        return customer;
     }
 }
 
