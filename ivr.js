@@ -1336,7 +1336,8 @@ async function presentMainMenu(call, phone) {
 
     const choice = liveJump || await call.read([
         ...intro,
-        MSG(2),   // 002 - קובץ ריק — הודעה זמנית לכניסה
+        // 002 - הודעה זמנית לכניסה (הכרזת המבצע). מי שכבר מימש היום את ההקלטה החינמית - לא שומע אותה עד חצות
+        ...(customer && customer.promo_used_today ? [] : [MSG(2)]),
         ...balanceParts,
         ...replyParts,
         MSG(4),   // 004 - תפריט ראשי: הקש 1... הקש 9 (יש לעדכן בימות שגם הקש 7 קיים - כניסה עם מספר תלמיד)
