@@ -1365,6 +1365,17 @@ async function presentMainMenu(call, phone) {
     }
 }
 
+// --- מבצע: לפני ההקלטה - לממש עכשיו את ההקלטה החינמית? (מיועדת לתכנים תורניים) ---
+// 1 = ההקלטה הזו חינם (עד מספר הדקות); 2 = במסלול הרגיל בתשלום, והזכות החינמית נשמרת להמשך היום
+async function askPromoUse(call, promoLeft) {
+    const promoMin = Math.max(1, Math.floor(promoLeft / 60));
+    const ans = await call.read([
+        SAY(315, 'במסגרת המבצע, ההקלטה הראשונה שלכם היום חינם, עד'), TTS(String(promoMin)), SAY(316, 'דקות'),
+        SAY(323, 'ההקלטה החינמית מיועדת לתכנים תורניים בלבד. האם לממש אותה כעת? לאישור הקישו 1, להמשך במסלול הרגיל בתשלום הקישו 2'),
+    ], 'tap', { max_digits: 1, digits_allowed: [1, 2] });
+    return ans === '1';
+}
+
 // --- צירוף המספר לחשבון באתר (services/phone_link.py בשרת) ---
 async function handlePhoneLink(call, phone, customer) {
     liveStage(call, 'צירוף מספר לחשבון באתר');
@@ -1909,6 +1920,7 @@ async function handleRecording(call, phone, customer) {
     if (tierChoice === '6' && mailOn) return await handleEmailOut(call, phone, customer);
 
     let transcriptionTier = tierChoice === '2' ? 'premium' : 'gemini';
+    let promoChosen = false;   // כבר בחר במפורש בהקלטה החינמית (317) - לא שואלים שוב
 
     // בחר מקצועי בלי מספיק יתרה, אבל יש לו הקלטה חינם במבצע (תמלול רגיל) - מציעים לעבור לרגיל
     if (transcriptionTier === 'premium' && balance < pricePremium && customer
@@ -1917,6 +1929,7 @@ async function handleRecording(call, phone, customer) {
             'tap', { max_digits: 1, digits_allowed: [0, 1] });
         if (sw !== '1') return await call.id_list_message([{ type: 'go_to_folder', data: '/' }]);
         transcriptionTier = 'gemini';
+        promoChosen = true;
     }
 
     const requiredPrice = transcriptionTier === 'premium' ? pricePremium : priceBasic;
@@ -1924,12 +1937,17 @@ async function handleRecording(call, phone, customer) {
     // מבצע "הקלטה ראשונה ביום חינם" (תמלול רגיל): מודיעים על הדקות החינמיות; אם המבצע גם למי שאין לו
     // יתרה (promo_needs_balance=false) - לא חוסמים על יתרה
     const promoLeft = transcriptionTier !== 'premium' && customer ? (parseInt(customer.promo_free_left, 10) || 0) : 0;
+    let usePromo = promoLeft > 0;
     if (promoLeft > 0) {
-        const promoMin = Math.max(1, Math.floor(promoLeft / 60));
-        await call.id_list_message([SAY(315, 'במסגרת המבצע, ההקלטה הראשונה שלכם היום חינם, עד'), TTS(String(promoMin)),
-            SAY(316, 'דקות')], { prependToNextAction: true });
+        if (customer.promo_ask && !promoChosen) {
+            usePromo = await askPromoUse(call, promoLeft);       // 1 = חינם עכשיו, 2 = במסלול הרגיל בתשלום
+        } else {
+            const promoMin = Math.max(1, Math.floor(promoLeft / 60));
+            await call.id_list_message([SAY(315, 'במסגרת המבצע, ההקלטה הראשונה שלכם היום חינם, עד'), TTS(String(promoMin)),
+                SAY(316, 'דקות')], { prependToNextAction: true });
+        }
     }
-    const promoNoBalanceOk = promoLeft > 0 && customer.promo_needs_balance === false;
+    const promoNoBalanceOk = usePromo && customer.promo_needs_balance === false;
 
     if (balance < requiredPrice && !promoNoBalanceOk) {
         const balanceShekel = Math.floor(balance);
@@ -2032,7 +2050,8 @@ async function handleRecording(call, phone, customer) {
             delivered_to: deliveredTo,
             transcription_tier: transcriptionTier,
             language: language,
-            output_language: outputLanguage
+            output_language: outputLanguage,
+            use_promo: promoLeft > 0 ? usePromo : undefined
         });
     } catch (e) {
         console.error('transcribe error:', e.message);
@@ -2901,6 +2920,10 @@ async function handleQuickRecord(call, phone, customer) {
     const language = defaults.language || 'he';
     const outputLanguage = defaults.output_language || 'he';
 
+    // מבצע: גם בהקלטה מהירה שואלים לפני ההקלטה אם לממש עכשיו את ההקלטה החינמית
+    const qPromoLeft = transcriptionTier !== 'premium' && customer ? (parseInt(customer.promo_free_left, 10) || 0) : 0;
+    const qUsePromo = qPromoLeft > 0 && customer.promo_ask ? await askPromoUse(call, qPromoLeft) : qPromoLeft > 0;
+
     // הקלטה מיידית
     // הקלטה עם תפריט אחרי סולמית: 1 שליחה, 2 הקלטה מחדש, 3 המשך הקלטה (ראה recordWithMenu)
     const recPath = await recordWithMenu(call, phone, customer, { transcriptionTier, language, outputLanguage });
@@ -2938,7 +2961,8 @@ async function handleQuickRecord(call, phone, customer) {
         await axios.post(`${PYTHON_URL}/api/transcribe`, {
             phone, rec_url: fullRecUrl, call_id: call.ApiCallId,
             delivery_method: deliveryMethod, delivered_to: deliveredTo,
-            transcription_tier: transcriptionTier, language, output_language: outputLanguage
+            transcription_tier: transcriptionTier, language, output_language: outputLanguage,
+            use_promo: qPromoLeft > 0 ? qUsePromo : undefined
         });
     } catch (e) {
         console.error('quick record transcribe error:', e.message);
